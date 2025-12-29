@@ -461,7 +461,7 @@ class VideoTitlerApp:
                     index_padding=padding,
                     title=title,
                 )
-                target = pick_non_conflicting_path(target)
+                target = pick_non_conflicting_path(target, ignore_path=src_path)
                 self._queue.put(("title", (src_path, title, target.name)))
                 self._queue.put(("status", (src_path, "待重命名")))
             except (DeepSeekError, OSError) as exc:
@@ -491,7 +491,7 @@ class VideoTitlerApp:
         row.title = title
         index = self._compute_index_for_row(row)
         target = build_target_path(old_path, index=index, index_padding=cfg.index_padding, title=title)
-        target = pick_non_conflicting_path(target)
+        target = pick_non_conflicting_path(target, ignore_path=old_path)
         row.new_name = target.name
 
         if cfg.dry_run:
@@ -501,6 +501,14 @@ class VideoTitlerApp:
             return
 
         try:
+            if target == old_path:
+                row.status = "完成"
+                row.error = ""
+                self._set_error("")
+                self._append_log(f"[完成] {old_path.name}（无需重命名）")
+                self._update_row(old_path, status=row.status, title=row.title, new_name=row.new_name, error=row.error)
+                return
+
             self._update_row(old_path, status="重命名…", title=row.title, new_name=row.new_name)
             old_path.rename(target)
             self._queue.put(("renamed", (old_path, target)))
@@ -676,15 +684,18 @@ class VideoTitlerApp:
                     index_padding=index_padding,
                     title=title,
                 )
-                target = pick_non_conflicting_path(target)
+                target = pick_non_conflicting_path(target, ignore_path=old_path)
                 self._queue.put(("title", (old_path, title, target.name)))
 
                 if cfg.dry_run:
                     self._queue.put(("status", (old_path, "预览")))
                 else:
-                    old_path.rename(target)
-                    self._queue.put(("renamed", (old_path, target)))
-                    self._queue.put(("status", (target, "完成")))
+                    if target != old_path:
+                        old_path.rename(target)
+                        self._queue.put(("renamed", (old_path, target)))
+                        self._queue.put(("status", (target, "完成")))
+                    else:
+                        self._queue.put(("status", (old_path, "完成")))
             except OSError as exc:
                 self._queue.put(("error", (old_path, f"重命名失败：{exc}")))
             except Exception:
@@ -731,7 +742,7 @@ class VideoTitlerApp:
                     index_padding=cfg.index_padding,
                     title=title,
                 )
-                target = pick_non_conflicting_path(target)
+                target = pick_non_conflicting_path(target, ignore_path=row.path)
 
                 new_name = target.name
                 self._queue.put(("title", (row.path, title, new_name)))
@@ -739,10 +750,14 @@ class VideoTitlerApp:
                 if not cfg.dry_run:
                     stage = "重命名"
                     old_path = row.path
-                    old_path.rename(target)
-                    self._queue.put(("renamed", (old_path, target)))
+                    if target != old_path:
+                        old_path.rename(target)
+                        self._queue.put(("renamed", (old_path, target)))
 
-                self._queue.put(("status", ((target if not cfg.dry_run else row.path), "完成")))
+                if cfg.dry_run or target == row.path:
+                    self._queue.put(("status", (row.path, "完成")))
+                else:
+                    self._queue.put(("status", (target, "完成")))
             except (VideoFrameError, BaiduOcrError, DeepSeekError, OSError) as exc:
                 self._queue.put(("error", (row.path, f"{stage}失败：{exc}")))
             except Exception:

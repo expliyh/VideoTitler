@@ -35,7 +35,10 @@ def build_target_path(
     return src_path.with_name(filename)
 
 
-def pick_non_conflicting_path(target_path: Path) -> Path:
+def pick_non_conflicting_path(target_path: Path, *, ignore_path: Path | None = None) -> Path:
+    if ignore_path is not None and target_path == ignore_path:
+        return target_path
+
     if not target_path.exists():
         return target_path
 

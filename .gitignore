@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Local secrets / settings
+config.json
+
+# IDE
+.idea/

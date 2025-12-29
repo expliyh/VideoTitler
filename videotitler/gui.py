@@ -833,11 +833,18 @@ class VideoTitlerApp:
         if not self._tree.exists(old_iid):
             return
 
+        parent = self._tree.parent(old_iid)
+        index = self._tree.index(old_iid)
+        was_selected = old_iid in self._tree.selection()
+
         values = list(self._tree.item(old_iid, "values"))
         if values:
             values[0] = new_path.name
         self._tree.delete(old_iid)
-        self._tree.insert("", END, iid=new_iid, values=values)
+        self._tree.insert(parent, index, iid=new_iid, values=values)
+        if was_selected:
+            self._tree.selection_set(new_iid)
+            self._tree.focus(new_iid)
 
     def _update_row(
         self,

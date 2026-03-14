@@ -34,15 +34,28 @@ function updateItem(
   return items.map((item) => (item.id === itemId ? updater(item) : item));
 }
 
+function selectAvailableItemId(items: ProcessingItem[], selectedItemId: string | null): string | null {
+  if (selectedItemId && items.some((item) => item.id === selectedItemId)) {
+    return selectedItemId;
+  }
+
+  return items[0]?.id ?? null;
+}
+
+export function applyRenamedSourceDirectoryItems(state: UiState, items: ProcessingItem[]): UiState {
+  return {
+    ...state,
+    items,
+    selectedItemId: selectAvailableItemId(items, state.selectedItemId)
+  };
+}
+
 export function applyWorkerEvent(state: UiState, event: WorkerEvent): UiState {
   if (event.event === 'scan_result') {
-    const selectedItemId = state.selectedItemId && event.items.some((item) => item.id === state.selectedItemId)
-      ? state.selectedItemId
-      : event.items[0]?.id ?? null;
     return {
       ...state,
       items: event.items,
-      selectedItemId,
+      selectedItemId: selectAvailableItemId(event.items, state.selectedItemId),
       session: {
         ...state.session,
         progressCurrent: 0,

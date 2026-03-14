@@ -291,6 +291,56 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertTrue((root / "002-Custom Title_2.mp4").exists())
             self.assertFalse(target.exists())
 
+    def test_rename_source_directory_updates_config_and_items(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "source-videos"
+            source_dir.mkdir()
+            video_path = source_dir / "clip1.mp4"
+            video_path.write_bytes(b"clip")
+            other_dir = root / "other"
+            other_dir.mkdir()
+
+            worker = self._create_worker(root / "settings.json")
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(source_dir),
+                        "include_subdirs": False,
+                        "frame_number_1based": 1,
+                        "start_index": 1,
+                        "index_padding": 3,
+                        "dry_run": False,
+                        "baidu_ocr_mode": "accurate_basic",
+                        "deepseek_base_url": "https://api.deepseek.com/v1",
+                        "deepseek_model": "deepseek-chat",
+                        "deepseek_system_prompt": "system",
+                        "deepseek_user_prompt_template": "user {ocr_text}",
+                        "recent_dirs": [str(source_dir), str(other_dir)],
+                    }
+                },
+            )
+            worker.handle_request("scan_videos", {"directory": str(source_dir), "include_subdirs": False})
+
+            result = worker.handle_request(
+                "rename_source_directory",
+                {
+                    "directory": str(source_dir),
+                    "newName": "renamed-videos",
+                },
+            )
+
+            renamed_dir = root / "renamed-videos"
+            self.assertFalse(source_dir.exists())
+            self.assertTrue(renamed_dir.exists())
+            self.assertEqual(result["inputDir"], str(renamed_dir))
+            self.assertEqual(result["recentDirs"], [str(renamed_dir), str(other_dir)])
+            self.assertEqual(result["items"][0]["fullPath"], str(renamed_dir / "clip1.mp4"))
+
+            settings = worker.handle_request("load_settings", {})
+            self.assertEqual(settings["settings"]["inputDir"], str(renamed_dir))
+
     def _create_worker(
         self,
         config_path: Path,

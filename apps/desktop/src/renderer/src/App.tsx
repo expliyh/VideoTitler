@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 
 import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
 
-import { applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
+import { applyRenamedSourceDirectoryItems, applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
 import { getUiText, resolveSystemLanguage } from './i18n';
 import { VideoSummaryItem } from './components/VideoSummaryItem';
 
@@ -117,6 +117,11 @@ function getStatusTone(item: ProcessingItem): 'error' | 'ready' | 'working' | 'i
   return 'idle';
 }
 
+function getPathLeaf(path: string): string {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] ?? '';
+}
+
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [secretDraft, setSecretDraft] = useState<SecretDraftState>(EMPTY_SECRETS);
@@ -127,6 +132,8 @@ export function App() {
   });
   const [ocrDraft, setOcrDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
+  const [isRenamingSourceDirectory, setIsRenamingSourceDirectory] = useState(false);
+  const [sourceDirectoryRenameDraft, setSourceDirectoryRenameDraft] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -145,6 +152,7 @@ export function App() {
   const canStartProcessing = uiState.items.length > 0 && !uiState.session.isProcessing;
   const canRenameAll = uiState.items.length > 0 && !uiState.session.isProcessing;
   const canStop = uiState.session.isProcessing;
+  const canRenameSourceDirectory = Boolean(settings.inputDir.trim()) && !uiState.session.isProcessing && !isSavingSettings;
   const systemLanguage = useMemo<SupportedLanguage>(() => {
     if (typeof navigator === 'undefined') {
       return 'en';
@@ -299,6 +307,14 @@ export function App() {
     setTitleDraft(selectedItem?.suggestedTitle ?? '');
   }, [selectedItem?.id, selectedItem?.ocrText, selectedItem?.suggestedTitle]);
 
+  useEffect(() => {
+    if (!isRenamingSourceDirectory) {
+      return;
+    }
+
+    setSourceDirectoryRenameDraft(getPathLeaf(settings.inputDir));
+  }, [isRenamingSourceDirectory, settings.inputDir]);
+
   const appendLog = (message: string) => {
     setUiState((previous) => ({
       ...previous,
@@ -376,6 +392,57 @@ export function App() {
       await api.openDirectory(settings.inputDir);
     } catch (error) {
       appendLog(i18n.openDirectoryFailed(formatError(error)));
+    }
+  };
+
+  const handleStartRenameSourceDirectory = () => {
+    if (!settings.inputDir.trim()) {
+      appendLog(i18n.selectSourceDirectoryFirst);
+      return;
+    }
+
+    setSourceDirectoryRenameDraft(getPathLeaf(settings.inputDir));
+    setIsRenamingSourceDirectory(true);
+  };
+
+  const handleCancelRenameSourceDirectory = () => {
+    setIsRenamingSourceDirectory(false);
+    setSourceDirectoryRenameDraft('');
+  };
+
+  const handleRenameSourceDirectory = async () => {
+    if (!api) {
+      return;
+    }
+
+    const currentDirectory = settings.inputDir.trim();
+    const nextName = sourceDirectoryRenameDraft.trim();
+    if (!currentDirectory) {
+      appendLog(i18n.selectSourceDirectoryFirst);
+      return;
+    }
+    if (!nextName) {
+      appendLog(i18n.renameSourceDirectoryEmptyName);
+      return;
+    }
+    if (nextName === getPathLeaf(currentDirectory)) {
+      appendLog(i18n.renameSourceDirectoryUnchanged);
+      return;
+    }
+
+    try {
+      const result = await api.renameSourceDirectory(currentDirectory, nextName);
+      setSettings((previous) => ({
+        ...previous,
+        inputDir: result.inputDir,
+        recentDirs: result.recentDirs
+      }));
+      setUiState((previous) => applyRenamedSourceDirectoryItems(previous, result.items));
+      setIsRenamingSourceDirectory(false);
+      setSourceDirectoryRenameDraft('');
+      appendLog(i18n.renameSourceDirectoryLog(result.inputDir));
+    } catch (error) {
+      appendLog(i18n.renameSourceDirectoryFailed(formatError(error)));
     }
   };
 
@@ -592,7 +659,26 @@ export function App() {
               <button type="button" className="button ghost" onClick={handleOpenDirectory} disabled={!settings.inputDir.trim()}>
                 {i18n.open}
               </button>
+              <button type="button" className="button ghost" onClick={handleStartRenameSourceDirectory} disabled={!canRenameSourceDirectory}>
+                {i18n.renameSourceDirectory}
+              </button>
             </div>
+            {isRenamingSourceDirectory ? (
+              <div className="directory-rename-row">
+                <input
+                  value={sourceDirectoryRenameDraft}
+                  onChange={(event) => setSourceDirectoryRenameDraft(event.target.value)}
+                  placeholder={i18n.renameSourceDirectoryPlaceholder}
+                  aria-label={i18n.renameSourceDirectory}
+                />
+                <button type="button" className="button secondary" onClick={handleRenameSourceDirectory} disabled={!canRenameSourceDirectory}>
+                  {i18n.renameSourceDirectoryConfirm}
+                </button>
+                <button type="button" className="button ghost" onClick={handleCancelRenameSourceDirectory}>
+                  {i18n.cancel}
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <div className="control-grid">

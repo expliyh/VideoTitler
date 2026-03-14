@@ -4,6 +4,7 @@ import type {
   AppSettings,
   AppSettingsInput,
   ProcessingItem,
+  RenameSourceDirectoryResult,
   WorkerEvent,
   WorkerLifecycleEvent
 } from '@videotitler/core';
@@ -36,6 +37,8 @@ const api = {
   stopProcessing: (): Promise<void> => invoke('worker:stop-processing'),
   saveOcrEdit: (id: string, text: string): Promise<ProcessingItem> => invoke('worker:save-ocr-edit', { id, text }),
   saveTitleEdit: (id: string, title: string): Promise<ProcessingItem> => invoke('worker:save-title-edit', { id, title }),
+  renameSourceDirectory: (directory: string, newName: string): Promise<RenameSourceDirectoryResult> =>
+    invoke('worker:rename-source-directory', { directory, newName }),
   generateTitle: (id: string, ocrText?: string): Promise<ProcessingItem> =>
     invoke('worker:generate-title', { id, ocrText }),
   renameOne: (id: string, suggestedTitle?: string): Promise<ProcessingItem> =>

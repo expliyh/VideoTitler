@@ -76,6 +76,8 @@ export type UiText = {
   model: string;
   systemPrompt: string;
   userPromptTemplate: string;
+  enlargeEditor: string;
+  closeEditor: string;
   recentDirectories: string;
   recentDirsEmpty: string;
   saveSettings: string;

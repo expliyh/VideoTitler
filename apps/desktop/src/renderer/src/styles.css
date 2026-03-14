@@ -462,6 +462,16 @@ textarea {
   margin: 0;
 }
 
+.editor-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.editor-expand-button {
+  justify-self: flex-start;
+  padding: 0.5rem 0.8rem;
+}
+
 .error-banner {
   padding: 0.85rem 0.95rem;
   border-radius: 16px;
@@ -566,6 +576,56 @@ textarea {
   justify-content: flex-end;
 }
 
+.editor-modal {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.editor-modal.open {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.editor-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(27, 21, 16, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.editor-modal-panel {
+  position: absolute;
+  inset: 5vh 10vw;
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(250, 245, 237, 0.98));
+  border: 1px solid rgba(115, 93, 63, 0.12);
+  border-radius: 20px;
+  box-shadow: 0 18px 50px rgba(34, 26, 18, 0.24);
+  padding: 1rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.editor-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.editor-modal-header h3 {
+  margin: 0;
+}
+
+.editor-modal-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  resize: none;
+}
+
 .fatal-shell {
   min-height: 100vh;
   display: grid;
@@ -607,5 +667,9 @@ textarea {
 
   .settings-panel {
     width: 100%;
+  }
+
+  .editor-modal-panel {
+    inset: 2vh 2vw;
   }
 }

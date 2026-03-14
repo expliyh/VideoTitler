@@ -76,6 +76,8 @@ export const en: UiText = {
   model: 'Model',
   systemPrompt: 'System prompt',
   userPromptTemplate: 'User prompt template',
+  enlargeEditor: 'Expand editor',
+  closeEditor: 'Close editor',
   recentDirectories: 'Recent directories',
   recentDirsEmpty: 'Recent directories appear here after you save or run commands.',
   saveSettings: 'Save settings',

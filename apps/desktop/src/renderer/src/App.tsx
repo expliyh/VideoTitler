@@ -117,6 +117,7 @@ function getStatusTone(item: ProcessingItem): 'error' | 'ready' | 'working' | 'i
 }
 
 export function App() {
+  const [expandedEditor, setExpandedEditor] = useState<null | 'ocrDraft' | 'deepseekSystemPrompt' | 'deepseekUserPromptTemplate'>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [secretDraft, setSecretDraft] = useState<SecretDraftState>(EMPTY_SECRETS);
   const [uiState, setUiState] = useState<UiState>(createInitialUiState);
@@ -150,6 +151,38 @@ export function App() {
   }, []);
   const effectiveLanguage = settings.uiLanguage === 'system' ? systemLanguage : settings.uiLanguage;
   const i18n = getUiText(effectiveLanguage);
+
+  const openExpandedEditor = (field: 'ocrDraft' | 'deepseekSystemPrompt' | 'deepseekUserPromptTemplate') => {
+    setExpandedEditor(field);
+  };
+
+  const closeExpandedEditor = () => {
+    setExpandedEditor(null);
+  };
+
+  const expandedEditorValue = useMemo(() => {
+    if (expandedEditor === 'ocrDraft') return ocrDraft;
+    if (expandedEditor === 'deepseekSystemPrompt') return settings.deepseekSystemPrompt;
+    if (expandedEditor === 'deepseekUserPromptTemplate') return settings.deepseekUserPromptTemplate;
+    return '';
+  }, [expandedEditor, ocrDraft, settings.deepseekSystemPrompt, settings.deepseekUserPromptTemplate]);
+
+  const expandedEditorTitle = useMemo(() => {
+    if (expandedEditor === 'ocrDraft') return i18n.ocrText;
+    if (expandedEditor === 'deepseekSystemPrompt') return i18n.systemPrompt;
+    if (expandedEditor === 'deepseekUserPromptTemplate') return i18n.userPromptTemplate;
+    return '';
+  }, [expandedEditor, i18n.ocrText, i18n.systemPrompt, i18n.userPromptTemplate]);
+
+  const handleExpandedEditorChange = (value: string) => {
+    if (expandedEditor === 'ocrDraft') {
+      setOcrDraft(value);
+    } else if (expandedEditor === 'deepseekSystemPrompt') {
+      setSettings((previous) => ({ ...previous, deepseekSystemPrompt: value }));
+    } else if (expandedEditor === 'deepseekUserPromptTemplate') {
+      setSettings((previous) => ({ ...previous, deepseekUserPromptTemplate: value }));
+    }
+  };
 
   useEffect(() => {
     if (!api) {
@@ -694,9 +727,14 @@ export function App() {
             <div className="editor-block">
               <div className="editor-header">
                 <h3>{i18n.ocrText}</h3>
-                <button type="button" className="button ghost" onClick={handleSaveOcr} disabled={!selectedItem}>
-                  {i18n.saveOcr}
-                </button>
+                <div className="editor-actions">
+                  <button type="button" className="button ghost" onClick={() => openExpandedEditor('ocrDraft')} disabled={!selectedItem}>
+                    {i18n.enlargeEditor}
+                  </button>
+                  <button type="button" className="button ghost" onClick={handleSaveOcr} disabled={!selectedItem}>
+                    {i18n.saveOcr}
+                  </button>
+                </div>
               </div>
               <textarea
                 rows={10}
@@ -861,6 +899,9 @@ export function App() {
 
             <label className="field">
               <span>{i18n.systemPrompt}</span>
+              <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekSystemPrompt')}>
+                {i18n.enlargeEditor}
+              </button>
               <textarea
                 rows={5}
                 value={settings.deepseekSystemPrompt}
@@ -870,6 +911,9 @@ export function App() {
 
             <label className="field">
               <span>{i18n.userPromptTemplate}</span>
+              <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekUserPromptTemplate')}>
+                {i18n.enlargeEditor}
+              </button>
               <textarea
                 rows={7}
                 value={settings.deepseekUserPromptTemplate}
@@ -907,6 +951,25 @@ export function App() {
             </button>
           </div>
         </aside>
+      </div>
+
+      <div className={`editor-modal ${expandedEditor ? 'open' : ''}`} aria-hidden={!expandedEditor}>
+        <div className="editor-modal-backdrop" onClick={closeExpandedEditor} />
+        <section className="editor-modal-panel">
+          <div className="editor-modal-header">
+            <h3>{expandedEditorTitle}</h3>
+            <button type="button" className="button ghost" onClick={closeExpandedEditor}>
+              {i18n.closeEditor}
+            </button>
+          </div>
+          <textarea
+            className="editor-modal-textarea"
+            rows={16}
+            value={expandedEditorValue}
+            onChange={(event) => handleExpandedEditorChange(event.target.value)}
+            disabled={expandedEditor === 'ocrDraft' && !selectedItem}
+          />
+        </section>
       </div>
     </div>
   );

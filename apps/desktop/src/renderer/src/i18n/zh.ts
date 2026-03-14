@@ -76,6 +76,8 @@ export const zh: UiText = {
   model: '模型',
   systemPrompt: '系统提示词',
   userPromptTemplate: '用户提示词模板',
+  enlargeEditor: '放大编辑',
+  closeEditor: '关闭编辑器',
   recentDirectories: '最近目录',
   recentDirsEmpty: '保存设置或执行命令后，最近目录会显示在这里。',
   saveSettings: '保存设置',

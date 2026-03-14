@@ -898,10 +898,12 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>{i18n.systemPrompt}</span>
-              <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekSystemPrompt')}>
-                {i18n.enlargeEditor}
-              </button>
+              <div className="field-header">
+                <span>{i18n.systemPrompt}</span>
+                <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekSystemPrompt')}>
+                  {i18n.enlargeEditor}
+                </button>
+              </div>
               <textarea
                 rows={5}
                 value={settings.deepseekSystemPrompt}
@@ -910,10 +912,12 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>{i18n.userPromptTemplate}</span>
-              <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekUserPromptTemplate')}>
-                {i18n.enlargeEditor}
-              </button>
+              <div className="field-header">
+                <span>{i18n.userPromptTemplate}</span>
+                <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekUserPromptTemplate')}>
+                  {i18n.enlargeEditor}
+                </button>
+              </div>
               <textarea
                 rows={7}
                 value={settings.deepseekUserPromptTemplate}
@@ -958,7 +962,7 @@ export function App() {
         <section className="editor-modal-panel">
           <div className="editor-modal-header">
             <h3>{expandedEditorTitle}</h3>
-            <button type="button" className="button ghost" onClick={closeExpandedEditor}>
+            <button type="button" className="button ghost editor-modal-close" onClick={closeExpandedEditor}>
               {i18n.closeEditor}
             </button>
           </div>

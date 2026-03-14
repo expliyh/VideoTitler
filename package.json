@@ -1,0 +1,12 @@
+{
+  "name": "videotitler-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "dev": "pnpm --filter @videotitler/desktop dev",
+    "build": "pnpm --filter @videotitler/core build && pnpm --filter @videotitler/desktop build",
+    "dist": "pnpm --filter @videotitler/core build && pnpm --filter @videotitler/desktop dist",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

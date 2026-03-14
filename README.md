@@ -33,3 +33,28 @@
 - 在 “OCR/日志” 页可手动编辑 OCR 结果/标题，并对单条视频重新生成标题或重命名（失败的也可以补救）
 - OCR 默认使用百度“高精度”(`accurate_basic`)，可在主界面下拉切换为通用(`general_basic`)
 - 如果先勾选“仅预览(不改名)”跑一遍，可在确认/编辑标题后点击“重命名全部”一次性执行改名
+
+## 前端桌面端（Electron + React）
+
+已新增 Monorepo 结构：
+
+- `apps/desktop/`：Electron 主进程、预加载脚本、React 渲染进程
+- `packages/core/`：与 UI 无关的业务逻辑（目录扫描过滤、标题提取、重命名规则）
+
+### 运行脚本
+
+```bash
+pnpm install
+pnpm dev
+pnpm build
+pnpm dist
+```
+
+### 当前已迁移 UI 功能点
+
+- 目录扫描
+- 帧号设置（批量更新）
+- OCR 结果编辑
+- 单条重命名
+- 批量重命名
+- 日志查看

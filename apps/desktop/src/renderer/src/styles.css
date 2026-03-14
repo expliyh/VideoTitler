@@ -1,0 +1,80 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, 'PingFang SC', sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f4f6fb;
+}
+
+.page {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  background: white;
+  border-radius: 10px;
+  border: 1px solid #e0e4ec;
+  padding: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.controls .row {
+  margin-bottom: 8px;
+}
+
+input,
+button,
+textarea {
+  font: inherit;
+}
+
+input,
+textarea {
+  border: 1px solid #cad1df;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+button {
+  border: none;
+  background: #2f6feb;
+  color: white;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid #e5e7ed;
+  padding: 8px;
+  vertical-align: top;
+}
+
+pre {
+  background: #101826;
+  color: #c5d9ff;
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 240px;
+  overflow: auto;
+}

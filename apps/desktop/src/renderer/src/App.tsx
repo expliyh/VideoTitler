@@ -3,56 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
 
 import { applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
-
+import { getUiText, resolveSystemLanguage } from './i18n';
 
 const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['en', 'zh', 'fr'];
-
-type I18nBundle = {
-  languageLabel: string;
-  useSystemLanguage: string;
-  english: string;
-  chinese: string;
-  french: string;
-  settingsSaved: string;
-};
-
-const I18N_TEXT: Record<SupportedLanguage, I18nBundle> = {
-  en: {
-    languageLabel: 'App language',
-    useSystemLanguage: 'Follow system language',
-    english: 'English',
-    chinese: 'Chinese',
-    french: 'French',
-    settingsSaved: 'Settings saved.'
-  },
-  zh: {
-    languageLabel: '界面语言',
-    useSystemLanguage: '跟随系统语言',
-    english: '英语',
-    chinese: '中文',
-    french: '法语',
-    settingsSaved: '设置已保存。'
-  },
-  fr: {
-    languageLabel: "Langue de l'application",
-    useSystemLanguage: 'Suivre la langue du système',
-    english: 'Anglais',
-    chinese: 'Chinois',
-    french: 'Français',
-    settingsSaved: 'Paramètres enregistrés.'
-  }
-};
-
-function normalizeSupportedLanguage(value: string): SupportedLanguage {
-  const normalized = value.toLowerCase();
-  if (normalized.startsWith('zh')) {
-    return 'zh';
-  }
-  if (normalized.startsWith('fr')) {
-    return 'fr';
-  }
-  return 'en';
-}
 
 type SecretDraftState = {
   baiduApiKey: string;
@@ -169,7 +122,7 @@ export function App() {
   const [uiState, setUiState] = useState<UiState>(createInitialUiState);
   const [workerLifecycle, setWorkerLifecycle] = useState<WorkerLifecycleEvent>({
     state: 'starting',
-    message: 'Waiting for Electron preload...'
+    message: getUiText('en').waitingPreload
   });
   const [ocrDraft, setOcrDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
@@ -193,14 +146,14 @@ export function App() {
     if (typeof navigator === 'undefined') {
       return 'en';
     }
-    return normalizeSupportedLanguage(navigator.language);
+    return resolveSystemLanguage(navigator.language);
   }, []);
   const effectiveLanguage = settings.uiLanguage === 'system' ? systemLanguage : settings.uiLanguage;
-  const i18n = I18N_TEXT[effectiveLanguage];
+  const i18n = getUiText(effectiveLanguage);
 
   useEffect(() => {
     if (!api) {
-      setFatalError('The preload bridge is unavailable. Restart Electron and verify the preload bundle is loading.');
+      setFatalError(i18n.preloadUnavailableDetail);
       return;
     }
 
@@ -280,7 +233,7 @@ export function App() {
 
   const persistSettings = async (options?: { announce?: boolean }): Promise<AppSettings> => {
     if (!api) {
-      throw new Error('Electron preload API is unavailable.');
+      throw new Error(i18n.preloadUnavailableDetail);
     }
 
     setIsSavingSettings(true);
@@ -313,7 +266,7 @@ export function App() {
 
     if (!ready) {
       setIsSettingsOpen(true);
-      appendLog('Add the required API keys in Settings before running OCR and title extraction.');
+      appendLog(i18n.addApiKeysBeforeRun);
     }
 
     return ready;
@@ -330,7 +283,7 @@ export function App() {
         setSettings((previous) => ({ ...previous, inputDir: selectedDirectory }));
       }
     } catch (error) {
-      appendLog(`Directory picker failed: ${formatError(error)}`);
+      appendLog(i18n.directoryPickerFailed(formatError(error)));
     }
   };
 
@@ -342,7 +295,7 @@ export function App() {
     try {
       await api.openDirectory(settings.inputDir);
     } catch (error) {
-      appendLog(`Open directory failed: ${formatError(error)}`);
+      appendLog(i18n.openDirectoryFailed(formatError(error)));
     }
   };
 
@@ -352,19 +305,19 @@ export function App() {
     }
 
     if (!settings.inputDir.trim()) {
-      appendLog('Select or enter a source directory first.');
+      appendLog(i18n.selectSourceDirectoryFirst);
       return;
     }
 
     try {
       const savedSettings = await persistSettings();
-      appendLog(`Scanning ${savedSettings.inputDir}...`);
+      appendLog(i18n.scanningDirectoryLog(savedSettings.inputDir));
       await api.scanVideos({
         directory: savedSettings.inputDir,
         includeSubdirs: savedSettings.includeSubdirs
       });
     } catch (error) {
-      appendLog(`Scan failed: ${formatError(error)}`);
+      appendLog(i18n.scanFailed(formatError(error)));
     }
   };
 
@@ -404,7 +357,7 @@ export function App() {
           activeCommand: 'idle'
         }
       }));
-      appendLog(`Start processing failed: ${formatError(error)}`);
+      appendLog(i18n.startProcessingFailed(formatError(error)));
     }
   };
 
@@ -416,7 +369,7 @@ export function App() {
     try {
       await api.stopProcessing();
     } catch (error) {
-      appendLog(`Stop request failed: ${formatError(error)}`);
+      appendLog(i18n.stopRequestFailed(formatError(error)));
     }
   };
 
@@ -448,7 +401,7 @@ export function App() {
           activeCommand: 'idle'
         }
       }));
-      appendLog(`Rename all failed: ${formatError(error)}`);
+      appendLog(i18n.renameAllFailed(formatError(error)));
     }
   };
 
@@ -460,9 +413,9 @@ export function App() {
     try {
       const updatedItem = await api.saveOcrEdit(selectedItem.id, ocrDraft);
       setUiState((previous) => mergeReturnedItem(previous, updatedItem));
-      appendLog(`Saved OCR edits for ${updatedItem.fileName}.`);
+      appendLog(i18n.saveOcrLog(updatedItem.fileName));
     } catch (error) {
-      appendLog(`Save OCR failed: ${formatError(error)}`);
+      appendLog(i18n.saveOcrFailed(formatError(error)));
     }
   };
 
@@ -474,9 +427,9 @@ export function App() {
     try {
       const updatedItem = await api.saveTitleEdit(selectedItem.id, titleDraft);
       setUiState((previous) => mergeReturnedItem(previous, updatedItem));
-      appendLog(`Saved title edits for ${updatedItem.fileName}.`);
+      appendLog(i18n.saveTitleLog(updatedItem.fileName));
     } catch (error) {
-      appendLog(`Save title failed: ${formatError(error)}`);
+      appendLog(i18n.saveTitleFailed(formatError(error)));
     }
   };
 
@@ -492,9 +445,9 @@ export function App() {
     try {
       const updatedItem = await api.generateTitle(selectedItem.id, ocrDraft);
       setUiState((previous) => mergeReturnedItem(previous, updatedItem));
-      appendLog(`Generated title for ${updatedItem.fileName}.`);
+      appendLog(i18n.generateTitleLog(updatedItem.fileName));
     } catch (error) {
-      appendLog(`Generate title failed: ${formatError(error)}`);
+      appendLog(i18n.generateTitleFailed(formatError(error)));
     }
   };
 
@@ -506,9 +459,9 @@ export function App() {
     try {
       const updatedItem = await api.renameOne(selectedItem.id, titleDraft);
       setUiState((previous) => mergeReturnedItem(previous, updatedItem));
-      appendLog(`Renamed ${updatedItem.fileName}.`);
+      appendLog(i18n.renameSelectedLog(updatedItem.fileName));
     } catch (error) {
-      appendLog(`Rename selected failed: ${formatError(error)}`);
+      appendLog(i18n.renameSelectedFailed(formatError(error)));
     }
   };
 
@@ -516,8 +469,8 @@ export function App() {
     return (
       <div className="fatal-shell">
         <div className="fatal-card">
-          <p className="eyebrow">VideoTitler Desktop</p>
-          <h1>Preload bridge unavailable</h1>
+          <p className="eyebrow">{i18n.appName}</p>
+          <h1>{i18n.preloadUnavailableTitle}</h1>
           <p>{fatalError}</p>
         </div>
       </div>
@@ -529,42 +482,42 @@ export function App() {
       <div className="shell">
         <header className="hero card">
           <div>
-            <p className="eyebrow">VideoTitler Desktop</p>
-            <h1>Electron dashboard for the full OCR + title workflow</h1>
+            <p className="eyebrow">{i18n.appName}</p>
+            <h1>{i18n.heroTitle}</h1>
             <p className="hero-copy">
-              Scan a directory, extract preview frames, run OCR, generate titles, review edits, and rename one file or the full batch.
+              {i18n.heroCopy}
             </p>
           </div>
 
           <div className="hero-status">
             <span className={`lifecycle-badge lifecycle-${workerLifecycle.state}`}>{workerLifecycle.state}</span>
             <p>{workerLifecycle.message}</p>
-            <strong>{uiState.items.length} items</strong>
+            <strong>{i18n.itemsCount(uiState.items.length)}</strong>
           </div>
         </header>
 
         <section className="card control-bar">
           <div className="field directory-field">
-            <label htmlFor="input-dir">Source directory</label>
+            <label htmlFor="input-dir">{i18n.sourceDirectory}</label>
             <div className="directory-input-row">
               <input
                 id="input-dir"
                 value={settings.inputDir}
                 onChange={(event) => setSettings((previous) => ({ ...previous, inputDir: event.target.value }))}
-                placeholder="Choose or paste a directory path"
+                placeholder={i18n.chooseDirectoryPlaceholder}
               />
               <button type="button" className="button secondary" onClick={handleSelectDirectory}>
-                Browse
+                {i18n.browse}
               </button>
               <button type="button" className="button ghost" onClick={handleOpenDirectory} disabled={!settings.inputDir.trim()}>
-                Open
+                {i18n.open}
               </button>
             </div>
           </div>
 
           <div className="control-grid">
             <label className="field compact">
-              <span>Frame</span>
+              <span>{i18n.frame}</span>
               <input
                 type="number"
                 min={1}
@@ -574,7 +527,7 @@ export function App() {
             </label>
 
             <label className="field compact">
-              <span>Start index</span>
+              <span>{i18n.startIndex}</span>
               <input
                 type="number"
                 min={1}
@@ -584,7 +537,7 @@ export function App() {
             </label>
 
             <label className="field compact">
-              <span>Index padding</span>
+              <span>{i18n.indexPadding}</span>
               <input
                 type="number"
                 min={1}
@@ -595,7 +548,7 @@ export function App() {
             </label>
 
             <label className="field compact">
-              <span>OCR mode</span>
+              <span>{i18n.ocrMode}</span>
               <select
                 value={settings.ocrMode}
                 onChange={(event) => setSettings((previous) => ({ ...previous, ocrMode: event.target.value as AppSettings['ocrMode'] }))}
@@ -613,7 +566,7 @@ export function App() {
                 checked={settings.includeSubdirs}
                 onChange={(event) => setSettings((previous) => ({ ...previous, includeSubdirs: event.target.checked }))}
               />
-              <span>Include subdirectories</span>
+              <span>{i18n.includeSubdirs}</span>
             </label>
 
             <label className="toggle">
@@ -622,25 +575,25 @@ export function App() {
                 checked={settings.dryRun}
                 onChange={(event) => setSettings((previous) => ({ ...previous, dryRun: event.target.checked }))}
               />
-              <span>Dry run / preview only</span>
+              <span>{i18n.dryRun}</span>
             </label>
           </div>
 
           <div className="action-row">
             <button type="button" className="button secondary" onClick={handleScan} disabled={isHydrating || isSavingSettings}>
-              Scan videos
+              {i18n.scanVideos}
             </button>
             <button type="button" className="button primary" onClick={handleStartProcessing} disabled={!canStartProcessing || isSavingSettings}>
-              Start OCR + title extraction
+              {i18n.startProcess}
             </button>
             <button type="button" className="button ghost" onClick={handleStopProcessing} disabled={!canStop}>
-              Stop after current file
+              {i18n.stopAfterCurrent}
             </button>
             <button type="button" className="button accent" onClick={handleRenameAll} disabled={!canRenameAll || isSavingSettings}>
-              Rename all
+              {i18n.renameAll}
             </button>
             <button type="button" className="button ghost" onClick={() => setIsSettingsOpen(true)}>
-              Settings
+              {i18n.settings}
             </button>
           </div>
 
@@ -662,26 +615,26 @@ export function App() {
           <section className="card table-card">
             <div className="section-header">
               <div>
-                <p className="eyebrow">Batch list</p>
-                <h2>Scanned videos</h2>
+                <p className="eyebrow">{i18n.batchList}</p>
+                <h2>{i18n.scannedVideos}</h2>
               </div>
-              <p>{uiState.items.length === 0 ? 'Choose a directory and scan to populate the table.' : 'Select a row to inspect preview, OCR, title, and rename actions.'}</p>
+              <p>{uiState.items.length === 0 ? i18n.emptyTableHint : i18n.tableHint}</p>
             </div>
 
             {uiState.items.length === 0 ? (
               <div className="empty-state">
-                <strong>No videos loaded yet</strong>
-                <p>1. Select a directory. 2. Scan. 3. Start processing. 4. Review and rename.</p>
+                <strong>{i18n.noVideosLoaded}</strong>
+                <p>{i18n.stepsHint}</p>
               </div>
             ) : (
               <div className="table-wrap">
                 <table className="results-table">
                   <thead>
                     <tr>
-                      <th>File</th>
-                      <th>Status</th>
-                      <th>Suggested title</th>
-                      <th>Target filename</th>
+                      <th>{i18n.tableFile}</th>
+                      <th>{i18n.tableStatus}</th>
+                      <th>{i18n.tableSuggestedTitle}</th>
+                      <th>{i18n.tableTargetFilename}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -696,7 +649,7 @@ export function App() {
                           <span className="table-path">{item.fullPath}</span>
                         </td>
                         <td>
-                          <span className={`status-pill status-${getStatusTone(item)}`}>{item.status || 'idle'}</span>
+                          <span className={`status-pill status-${getStatusTone(item)}`}>{item.status || i18n.idle}</span>
                         </td>
                         <td>{item.suggestedTitle || '-'}</td>
                         <td>{item.newName || '-'}</td>
@@ -711,28 +664,28 @@ export function App() {
           <aside className="card detail-card">
             <div className="section-header">
               <div>
-                <p className="eyebrow">Review pane</p>
-                <h2>{selectedItem ? selectedItem.fileName : 'No selection'}</h2>
+                <p className="eyebrow">{i18n.reviewPane}</p>
+                <h2>{selectedItem ? selectedItem.fileName : i18n.noSelection}</h2>
               </div>
-              {selectedItem ? <p>{selectedItem.fullPath}</p> : <p>Select a row to view details.</p>}
+              {selectedItem ? <p>{selectedItem.fullPath}</p> : <p>{i18n.selectRowHint}</p>}
             </div>
 
             <div className="preview-card">
               {selectedItem?.previewDataUrl ? (
                 <img src={selectedItem.previewDataUrl} alt={selectedItem.fileName} className="preview-image" />
               ) : (
-                <div className="preview-placeholder">Preview frame will appear here after processing.</div>
+                <div className="preview-placeholder">{i18n.previewPlaceholder}</div>
               )}
             </div>
 
             <div className="meta-grid">
               <div className="meta-card">
-                <span className="meta-label">Current status</span>
-                <strong>{selectedItem?.status || 'idle'}</strong>
+                <span className="meta-label">{i18n.currentStatus}</span>
+                <strong>{selectedItem?.status || i18n.idle}</strong>
               </div>
               <div className="meta-card">
-                <span className="meta-label">Target filename</span>
-                <strong>{selectedItem?.newName || 'Not generated yet'}</strong>
+                <span className="meta-label">{i18n.targetFilename}</span>
+                <strong>{selectedItem?.newName || i18n.targetFilenameNotGenerated}</strong>
               </div>
             </div>
 
@@ -740,42 +693,42 @@ export function App() {
 
             <div className="editor-block">
               <div className="editor-header">
-                <h3>OCR text</h3>
+                <h3>{i18n.ocrText}</h3>
                 <button type="button" className="button ghost" onClick={handleSaveOcr} disabled={!selectedItem}>
-                  Save OCR
+                  {i18n.saveOcr}
                 </button>
               </div>
               <textarea
                 rows={10}
                 value={ocrDraft}
                 onChange={(event) => setOcrDraft(event.target.value)}
-                placeholder="OCR text appears here after processing. You can edit and save it."
+                placeholder={i18n.ocrPlaceholder}
                 disabled={!selectedItem}
               />
             </div>
 
             <div className="editor-block">
               <div className="editor-header">
-                <h3>Suggested title</h3>
+                <h3>{i18n.suggestedTitle}</h3>
                 <button type="button" className="button ghost" onClick={handleSaveTitle} disabled={!selectedItem}>
-                  Save title
+                  {i18n.saveTitle}
                 </button>
               </div>
               <textarea
                 rows={4}
                 value={titleDraft}
                 onChange={(event) => setTitleDraft(event.target.value)}
-                placeholder="Title suggestion appears here. Edit before renaming if needed."
+                placeholder={i18n.titlePlaceholder}
                 disabled={!selectedItem}
               />
             </div>
 
             <div className="detail-actions">
               <button type="button" className="button secondary" onClick={handleGenerateTitle} disabled={!selectedItem}>
-                Generate title from OCR
+                {i18n.generateTitleFromOcr}
               </button>
               <button type="button" className="button accent" onClick={handleRenameSelected} disabled={!selectedItem || uiState.session.isProcessing}>
-                Rename selected
+                {i18n.renameSelected}
               </button>
             </div>
           </aside>
@@ -784,13 +737,13 @@ export function App() {
         <section className="card log-card">
           <div className="section-header">
             <div>
-              <p className="eyebrow">Logs</p>
-              <h2>Worker + UI activity</h2>
+              <p className="eyebrow">{i18n.logs}</p>
+              <h2>{i18n.workerActivity}</h2>
             </div>
-            <p>{uiState.logs.length} entries</p>
+            <p>{i18n.entriesCount(uiState.logs.length)}</p>
           </div>
 
-          <pre className="log-output">{uiState.logs.join('\n') || 'Logs will appear here as you scan, process, edit, and rename videos.'}</pre>
+          <pre className="log-output">{uiState.logs.join('\n') || i18n.logsPlaceholder}</pre>
         </section>
       </div>
 
@@ -799,11 +752,11 @@ export function App() {
         <aside className="settings-panel">
           <div className="settings-header">
             <div>
-              <p className="eyebrow">Settings</p>
-              <h2>Secrets, prompts, and recent directories</h2>
+              <p className="eyebrow">{i18n.settings}</p>
+              <h2>{i18n.settingsSubtitle}</h2>
             </div>
             <button type="button" className="button ghost" onClick={() => setIsSettingsOpen(false)}>
-              Close
+              {i18n.close}
             </button>
           </div>
 
@@ -815,10 +768,10 @@ export function App() {
                 value={settings.uiLanguage}
                 onChange={(event) => setSettings((previous) => ({ ...previous, uiLanguage: event.target.value as LanguageSetting }))}
               >
-                <option value="system">{`${i18n.useSystemLanguage} (${I18N_TEXT[systemLanguage].languageLabel})`}</option>
+                <option value="system">{`${i18n.useSystemLanguage} (${getUiText(systemLanguage).languageLabel})`}</option>
                 {SUPPORTED_LANGUAGES.map((language) => (
                   <option key={language} value={language}>
-                    {language === 'en' ? i18n.english : language === 'zh' ? i18n.chinese : i18n.french}
+                    {i18n.languageName[language]}
                   </option>
                 ))}
               </select>
@@ -826,14 +779,14 @@ export function App() {
           </section>
 
           <section className="settings-section">
-            <h3>Secure API keys</h3>
+            <h3>{i18n.secureApiKeys}</h3>
             <div className="field">
-              <label htmlFor="baidu-api-key">Baidu API key</label>
+              <label htmlFor="baidu-api-key">{i18n.baiduApiKey}</label>
               <input
                 id="baidu-api-key"
                 value={secretDraft.baiduApiKey}
                 onChange={(event) => setSecretDraft((previous) => ({ ...previous, baiduApiKey: event.target.value, clearBaiduApiKey: false }))}
-                placeholder={settings.secretsState.hasBaiduApiKey ? 'Stored securely - leave blank to keep current value' : 'Paste a key to store securely'}
+                placeholder={settings.secretsState.hasBaiduApiKey ? i18n.storedPlaceholderKey : i18n.pasteKeyPlaceholder}
               />
               <label className="toggle compact-toggle">
                 <input
@@ -841,17 +794,17 @@ export function App() {
                   checked={secretDraft.clearBaiduApiKey}
                   onChange={(event) => setSecretDraft((previous) => ({ ...previous, clearBaiduApiKey: event.target.checked, baiduApiKey: event.target.checked ? '' : previous.baiduApiKey }))}
                 />
-                <span>Clear stored key</span>
+                <span>{i18n.clearStoredKey}</span>
               </label>
             </div>
 
             <div className="field">
-              <label htmlFor="baidu-secret-key">Baidu secret key</label>
+              <label htmlFor="baidu-secret-key">{i18n.baiduSecretKey}</label>
               <input
                 id="baidu-secret-key"
                 value={secretDraft.baiduSecretKey}
                 onChange={(event) => setSecretDraft((previous) => ({ ...previous, baiduSecretKey: event.target.value, clearBaiduSecretKey: false }))}
-                placeholder={settings.secretsState.hasBaiduSecretKey ? 'Stored securely - leave blank to keep current value' : 'Paste a secret to store securely'}
+                placeholder={settings.secretsState.hasBaiduSecretKey ? i18n.storedPlaceholderSecret : i18n.pasteSecretPlaceholder}
               />
               <label className="toggle compact-toggle">
                 <input
@@ -859,17 +812,17 @@ export function App() {
                   checked={secretDraft.clearBaiduSecretKey}
                   onChange={(event) => setSecretDraft((previous) => ({ ...previous, clearBaiduSecretKey: event.target.checked, baiduSecretKey: event.target.checked ? '' : previous.baiduSecretKey }))}
                 />
-                <span>Clear stored secret</span>
+                <span>{i18n.clearStoredSecret}</span>
               </label>
             </div>
 
             <div className="field">
-              <label htmlFor="deepseek-api-key">DeepSeek API key</label>
+              <label htmlFor="deepseek-api-key">{i18n.deepseekApiKey}</label>
               <input
                 id="deepseek-api-key"
                 value={secretDraft.deepseekApiKey}
                 onChange={(event) => setSecretDraft((previous) => ({ ...previous, deepseekApiKey: event.target.value, clearDeepseekApiKey: false }))}
-                placeholder={settings.secretsState.hasDeepseekApiKey ? 'Stored securely - leave blank to keep current value' : 'Paste a key to store securely'}
+                placeholder={settings.secretsState.hasDeepseekApiKey ? i18n.storedPlaceholderKey : i18n.pasteKeyPlaceholder}
               />
               <label className="toggle compact-toggle">
                 <input
@@ -877,21 +830,21 @@ export function App() {
                   checked={secretDraft.clearDeepseekApiKey}
                   onChange={(event) => setSecretDraft((previous) => ({ ...previous, clearDeepseekApiKey: event.target.checked, deepseekApiKey: event.target.checked ? '' : previous.deepseekApiKey }))}
                 />
-                <span>Clear stored key</span>
+                <span>{i18n.clearStoredKey}</span>
               </label>
             </div>
 
             <div className="presence-grid">
-              <span className={settings.secretsState.hasBaiduApiKey ? 'presence present' : 'presence missing'}>Baidu API key</span>
-              <span className={settings.secretsState.hasBaiduSecretKey ? 'presence present' : 'presence missing'}>Baidu secret</span>
-              <span className={settings.secretsState.hasDeepseekApiKey ? 'presence present' : 'presence missing'}>DeepSeek API key</span>
+              <span className={settings.secretsState.hasBaiduApiKey ? 'presence present' : 'presence missing'}>{i18n.baiduApiKey}</span>
+              <span className={settings.secretsState.hasBaiduSecretKey ? 'presence present' : 'presence missing'}>{i18n.baiduSecretKey}</span>
+              <span className={settings.secretsState.hasDeepseekApiKey ? 'presence present' : 'presence missing'}>{i18n.deepseekApiKey}</span>
             </div>
           </section>
 
           <section className="settings-section">
-            <h3>DeepSeek request settings</h3>
+            <h3>{i18n.deepseekRequestSettings}</h3>
             <label className="field">
-              <span>Base URL</span>
+              <span>{i18n.baseUrl}</span>
               <input
                 value={settings.deepseekBaseUrl}
                 onChange={(event) => setSettings((previous) => ({ ...previous, deepseekBaseUrl: event.target.value }))}
@@ -899,7 +852,7 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>Model</span>
+              <span>{i18n.model}</span>
               <input
                 value={settings.deepseekModel}
                 onChange={(event) => setSettings((previous) => ({ ...previous, deepseekModel: event.target.value }))}
@@ -907,7 +860,7 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>System prompt</span>
+              <span>{i18n.systemPrompt}</span>
               <textarea
                 rows={5}
                 value={settings.deepseekSystemPrompt}
@@ -916,7 +869,7 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>User prompt template</span>
+              <span>{i18n.userPromptTemplate}</span>
               <textarea
                 rows={7}
                 value={settings.deepseekUserPromptTemplate}
@@ -926,9 +879,9 @@ export function App() {
           </section>
 
           <section className="settings-section">
-            <h3>Recent directories</h3>
+            <h3>{i18n.recentDirectories}</h3>
             {settings.recentDirs.length === 0 ? (
-              <p className="muted">Recent directories appear here after you save or run commands.</p>
+              <p className="muted">{i18n.recentDirsEmpty}</p>
             ) : (
               <div className="recent-list">
                 {settings.recentDirs.map((directory) => (
@@ -950,7 +903,7 @@ export function App() {
 
           <div className="settings-footer">
             <button type="button" className="button secondary" onClick={() => void persistSettings({ announce: true })} disabled={isSavingSettings}>
-              Save settings
+              {i18n.saveSettings}
             </button>
           </div>
         </aside>

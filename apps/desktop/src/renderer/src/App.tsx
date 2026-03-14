@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
 
 import { applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
 import { getUiText, resolveSystemLanguage } from './i18n';
+import { VideoSummaryItem } from './components/VideoSummaryItem';
 
 const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['en', 'zh', 'fr'];
 
@@ -130,8 +131,10 @@ export function App() {
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [fatalError, setFatalError] = useState('');
+  const [detailCardHeight, setDetailCardHeight] = useState<number | null>(null);
 
   const api = typeof window !== 'undefined' ? window.videoTitlerApi : undefined;
+  const detailCardRef = useRef<HTMLElement | null>(null);
   const selectedItem = useMemo(
     () => uiState.items.find((item) => item.id === uiState.selectedItemId) ?? null,
     [uiState.items, uiState.selectedItemId]
@@ -150,6 +153,83 @@ export function App() {
   }, []);
   const effectiveLanguage = settings.uiLanguage === 'system' ? systemLanguage : settings.uiLanguage;
   const i18n = getUiText(effectiveLanguage);
+  const workspaceStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!detailCardHeight) {
+      return undefined;
+    }
+
+    return {
+      '--detail-card-height': `${detailCardHeight}px`
+    } as CSSProperties;
+  }, [detailCardHeight]);
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const detailCard = detailCardRef.current;
+    if (!detailCard) {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia('(min-width: 1181px)');
+    let frameId = 0;
+
+    const applyMeasuredHeight = () => {
+      if (!mediaQueryList.matches) {
+        setDetailCardHeight(null);
+        return;
+      }
+
+      const nextHeight = Math.round(detailCard.getBoundingClientRect().height);
+      setDetailCardHeight((previous) => (previous === nextHeight ? previous : nextHeight));
+    };
+
+    const scheduleMeasure = () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        applyMeasuredHeight();
+      });
+    };
+
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          scheduleMeasure();
+        });
+
+    resizeObserver?.observe(detailCard);
+    scheduleMeasure();
+
+    const handleMediaChange = () => {
+      scheduleMeasure();
+    };
+
+    window.addEventListener('resize', scheduleMeasure);
+    if (typeof mediaQueryList.addEventListener === 'function') {
+      mediaQueryList.addEventListener('change', handleMediaChange);
+    } else {
+      mediaQueryList.addListener(handleMediaChange);
+    }
+
+    return () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+      if (typeof mediaQueryList.removeEventListener === 'function') {
+        mediaQueryList.removeEventListener('change', handleMediaChange);
+      } else {
+        mediaQueryList.removeListener(handleMediaChange);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!api) {
@@ -611,7 +691,7 @@ export function App() {
           </div>
         </section>
 
-        <main className="workspace">
+        <main className="workspace" style={workspaceStyle}>
           <section className="card table-card">
             <div className="section-header">
               <div>
@@ -627,41 +707,30 @@ export function App() {
                 <p>{i18n.stepsHint}</p>
               </div>
             ) : (
-              <div className="table-wrap">
-                <table className="results-table">
-                  <thead>
-                    <tr>
-                      <th>{i18n.tableFile}</th>
-                      <th>{i18n.tableStatus}</th>
-                      <th>{i18n.tableSuggestedTitle}</th>
-                      <th>{i18n.tableTargetFilename}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {uiState.items.map((item) => (
-                      <tr
-                        key={item.id}
-                        data-selected={item.id === uiState.selectedItemId}
-                        onClick={() => setUiState((previous) => ({ ...previous, selectedItemId: item.id }))}
-                      >
-                        <td>
-                          <strong>{item.fileName}</strong>
-                          <span className="table-path">{item.fullPath}</span>
-                        </td>
-                        <td>
-                          <span className={`status-pill status-${getStatusTone(item)}`}>{item.status || i18n.idle}</span>
-                        </td>
-                        <td>{item.suggestedTitle || '-'}</td>
-                        <td>{item.newName || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="video-summary-scroll" role="region" aria-label={i18n.scannedVideos}>
+                <div className="video-summary-list" role="list">
+                  {uiState.items.map((item) => (
+                    <VideoSummaryItem
+                      key={item.id}
+                      item={item}
+                      isSelected={item.id === uiState.selectedItemId}
+                      fallbackIdleLabel={i18n.idle}
+                      statusTone={getStatusTone(item)}
+                      labels={{
+                        file: i18n.tableFile,
+                        status: i18n.tableStatus,
+                        suggestedTitle: i18n.tableSuggestedTitle,
+                        targetFilename: i18n.tableTargetFilename
+                      }}
+                      onSelect={() => setUiState((previous) => ({ ...previous, selectedItemId: item.id }))}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </section>
 
-          <aside className="card detail-card">
+          <aside className="card detail-card" ref={detailCardRef}>
             <div className="section-header">
               <div>
                 <p className="eyebrow">{i18n.reviewPane}</p>

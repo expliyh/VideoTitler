@@ -14,3 +14,4 @@ pnpm-lock.yaml
 apps/desktop/dist/
 apps/desktop/release/
 packages/*/dist/
+/docs/superpowers/

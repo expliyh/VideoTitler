@@ -330,7 +330,7 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.85rem;
   min-height: 0;
-  height: 100%;
+  height: var(--detail-card-height, 100%);
 }
 
 .empty-state,
@@ -349,7 +349,6 @@ textarea {
 .video-summary-scroll {
   height: 100%;
   min-height: 22rem;
-  max-height: clamp(26rem, calc(100vh - 11.5rem), 84vh);
   overflow: auto;
   padding-right: 0.3rem;
   margin-right: -0.2rem;

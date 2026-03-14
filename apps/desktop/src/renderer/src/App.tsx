@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 
 import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
 
@@ -131,6 +131,10 @@ export function App() {
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [fatalError, setFatalError] = useState('');
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const expandedTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const closeExpandedEditorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedElementRef = useRef<HTMLElement | null>(null);
 
   const api = typeof window !== 'undefined' ? window.videoTitlerApi : undefined;
   const selectedItem = useMemo(
@@ -183,6 +187,72 @@ export function App() {
       setSettings((previous) => ({ ...previous, deepseekUserPromptTemplate: value }));
     }
   };
+
+  const handleExpandedEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeExpandedEditor();
+      return;
+    }
+
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusableElements: HTMLElement[] = [];
+    if (expandedTextareaRef.current) {
+      focusableElements.push(expandedTextareaRef.current);
+    }
+    if (closeExpandedEditorButtonRef.current) {
+      focusableElements.push(closeExpandedEditorButtonRef.current);
+    }
+
+    if (focusableElements.length === 0) {
+      return;
+    }
+
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const currentIndex = activeElement ? focusableElements.findIndex((element) => element === activeElement) : -1;
+    const nextIndex = event.shiftKey
+      ? (currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1)
+      : (currentIndex === -1 || currentIndex === focusableElements.length - 1 ? 0 : currentIndex + 1);
+
+    event.preventDefault();
+    focusableElements[nextIndex]?.focus();
+  };
+
+  useEffect(() => {
+    const shellElement = shellRef.current;
+
+    if (expandedEditor) {
+      if (document.activeElement instanceof HTMLElement) {
+        lastFocusedElementRef.current = document.activeElement;
+      }
+
+      shellElement?.setAttribute('inert', '');
+      shellElement?.setAttribute('aria-hidden', 'true');
+
+      const frameId = window.requestAnimationFrame(() => {
+        const preferredTarget = expandedTextareaRef.current && !expandedTextareaRef.current.disabled
+          ? expandedTextareaRef.current
+          : closeExpandedEditorButtonRef.current;
+        preferredTarget?.focus();
+      });
+
+      return () => {
+        window.cancelAnimationFrame(frameId);
+        shellElement?.removeAttribute('inert');
+        shellElement?.removeAttribute('aria-hidden');
+      };
+    }
+
+    shellElement?.removeAttribute('inert');
+    shellElement?.removeAttribute('aria-hidden');
+    if (lastFocusedElementRef.current?.isConnected) {
+      lastFocusedElementRef.current.focus();
+    }
+    lastFocusedElementRef.current = null;
+  }, [expandedEditor]);
 
   useEffect(() => {
     if (!api) {
@@ -512,7 +582,7 @@ export function App() {
 
   return (
     <div className="page-shell">
-      <div className="shell">
+      <div className="shell" ref={shellRef}>
         <header className="hero card">
           <div>
             <p className="eyebrow">{i18n.appName}</p>
@@ -959,10 +1029,10 @@ export function App() {
 
       <div className={`editor-modal ${expandedEditor ? 'open' : ''}`} aria-hidden={!expandedEditor}>
         <div className="editor-modal-backdrop" onClick={closeExpandedEditor} />
-        <section className="editor-modal-panel">
+        <section className="editor-modal-panel" role="dialog" aria-modal="true" aria-label={expandedEditorTitle} onKeyDown={handleExpandedEditorKeyDown}>
           <div className="editor-modal-header">
             <h3>{expandedEditorTitle}</h3>
-            <button type="button" className="button ghost editor-modal-close" onClick={closeExpandedEditor}>
+            <button type="button" className="button ghost editor-modal-close" onClick={closeExpandedEditor} ref={closeExpandedEditorButtonRef}>
               {i18n.closeEditor}
             </button>
           </div>
@@ -972,6 +1042,7 @@ export function App() {
             value={expandedEditorValue}
             onChange={(event) => handleExpandedEditorChange(event.target.value)}
             disabled={expandedEditor === 'ocrDraft' && !selectedItem}
+            ref={expandedTextareaRef}
           />
         </section>
       </div>

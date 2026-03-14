@@ -10,6 +10,7 @@ import type {
 
 import { resolveProjectRoot, resolvePythonExecutable } from './python-runtime';
 import { PythonWorkerClient } from './python-worker';
+import { migrateLegacyConfigIfNeeded } from './legacy-config';
 import {
   EncryptedSecretFileStore,
   applySecretUpdates,
@@ -182,6 +183,7 @@ export class DesktopBackend {
       cwd: this.options.cwd,
       mainDir: this.options.mainDir
     });
+    await this.migrateLegacyConfig(projectRoot);
     const pythonExecutable = resolvePythonExecutable({
       projectRoot,
       env: this.options.env,
@@ -246,6 +248,28 @@ export class DesktopBackend {
         message: `[main] Failed to read secure secrets: ${error instanceof Error ? error.message : String(error)}`
       });
       return createEmptySecrets();
+    }
+  }
+
+  private async migrateLegacyConfig(projectRoot: string): Promise<void> {
+    try {
+      const migrated = await migrateLegacyConfigIfNeeded({
+        settingsPath: this.settingsPath,
+        legacyConfigPath: join(projectRoot, 'config.json'),
+        secretStore: this.secretStore
+      });
+
+      if (migrated) {
+        this.options.onWorkerEvent({
+          event: 'log',
+          message: '[main] Imported legacy config.json into the new Electron settings store.'
+        });
+      }
+    } catch (error) {
+      this.options.onWorkerEvent({
+        event: 'log',
+        message: `[main] Failed to import legacy config.json: ${error instanceof Error ? error.message : String(error)}`
+      });
     }
   }
 }

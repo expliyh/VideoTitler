@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 
 import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
 
@@ -117,6 +117,7 @@ function getStatusTone(item: ProcessingItem): 'error' | 'ready' | 'working' | 'i
 }
 
 export function App() {
+  const [expandedEditor, setExpandedEditor] = useState<null | 'ocrDraft' | 'deepseekSystemPrompt' | 'deepseekUserPromptTemplate'>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [secretDraft, setSecretDraft] = useState<SecretDraftState>(EMPTY_SECRETS);
   const [uiState, setUiState] = useState<UiState>(createInitialUiState);
@@ -130,6 +131,10 @@ export function App() {
   const [isHydrating, setIsHydrating] = useState(true);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [fatalError, setFatalError] = useState('');
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const expandedTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const closeExpandedEditorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedElementRef = useRef<HTMLElement | null>(null);
 
   const api = typeof window !== 'undefined' ? window.videoTitlerApi : undefined;
   const selectedItem = useMemo(
@@ -150,6 +155,104 @@ export function App() {
   }, []);
   const effectiveLanguage = settings.uiLanguage === 'system' ? systemLanguage : settings.uiLanguage;
   const i18n = getUiText(effectiveLanguage);
+
+  const openExpandedEditor = (field: 'ocrDraft' | 'deepseekSystemPrompt' | 'deepseekUserPromptTemplate') => {
+    setExpandedEditor(field);
+  };
+
+  const closeExpandedEditor = () => {
+    setExpandedEditor(null);
+  };
+
+  const expandedEditorValue = useMemo(() => {
+    if (expandedEditor === 'ocrDraft') return ocrDraft;
+    if (expandedEditor === 'deepseekSystemPrompt') return settings.deepseekSystemPrompt;
+    if (expandedEditor === 'deepseekUserPromptTemplate') return settings.deepseekUserPromptTemplate;
+    return '';
+  }, [expandedEditor, ocrDraft, settings.deepseekSystemPrompt, settings.deepseekUserPromptTemplate]);
+
+  const expandedEditorTitle = useMemo(() => {
+    if (expandedEditor === 'ocrDraft') return i18n.ocrText;
+    if (expandedEditor === 'deepseekSystemPrompt') return i18n.systemPrompt;
+    if (expandedEditor === 'deepseekUserPromptTemplate') return i18n.userPromptTemplate;
+    return '';
+  }, [expandedEditor, i18n.ocrText, i18n.systemPrompt, i18n.userPromptTemplate]);
+
+  const handleExpandedEditorChange = (value: string) => {
+    if (expandedEditor === 'ocrDraft') {
+      setOcrDraft(value);
+    } else if (expandedEditor === 'deepseekSystemPrompt') {
+      setSettings((previous) => ({ ...previous, deepseekSystemPrompt: value }));
+    } else if (expandedEditor === 'deepseekUserPromptTemplate') {
+      setSettings((previous) => ({ ...previous, deepseekUserPromptTemplate: value }));
+    }
+  };
+
+  const handleExpandedEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeExpandedEditor();
+      return;
+    }
+
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusableElements: HTMLElement[] = [];
+    if (expandedTextareaRef.current) {
+      focusableElements.push(expandedTextareaRef.current);
+    }
+    if (closeExpandedEditorButtonRef.current) {
+      focusableElements.push(closeExpandedEditorButtonRef.current);
+    }
+
+    if (focusableElements.length === 0) {
+      return;
+    }
+
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const currentIndex = activeElement ? focusableElements.findIndex((element) => element === activeElement) : -1;
+    const nextIndex = event.shiftKey
+      ? (currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1)
+      : (currentIndex === -1 || currentIndex === focusableElements.length - 1 ? 0 : currentIndex + 1);
+
+    event.preventDefault();
+    focusableElements[nextIndex]?.focus();
+  };
+
+  useEffect(() => {
+    const shellElement = shellRef.current;
+
+    if (expandedEditor) {
+      if (document.activeElement instanceof HTMLElement) {
+        lastFocusedElementRef.current = document.activeElement;
+      }
+
+      shellElement?.setAttribute('inert', '');
+      shellElement?.setAttribute('aria-hidden', 'true');
+
+      const frameId = window.requestAnimationFrame(() => {
+        const preferredTarget = expandedTextareaRef.current && !expandedTextareaRef.current.disabled
+          ? expandedTextareaRef.current
+          : closeExpandedEditorButtonRef.current;
+        preferredTarget?.focus();
+      });
+
+      return () => {
+        window.cancelAnimationFrame(frameId);
+        shellElement?.removeAttribute('inert');
+        shellElement?.removeAttribute('aria-hidden');
+      };
+    }
+
+    shellElement?.removeAttribute('inert');
+    shellElement?.removeAttribute('aria-hidden');
+    if (lastFocusedElementRef.current?.isConnected) {
+      lastFocusedElementRef.current.focus();
+    }
+    lastFocusedElementRef.current = null;
+  }, [expandedEditor]);
 
   useEffect(() => {
     if (!api) {
@@ -479,7 +582,7 @@ export function App() {
 
   return (
     <div className="page-shell">
-      <div className="shell">
+      <div className="shell" ref={shellRef}>
         <header className="hero card">
           <div>
             <p className="eyebrow">{i18n.appName}</p>
@@ -694,9 +797,14 @@ export function App() {
             <div className="editor-block">
               <div className="editor-header">
                 <h3>{i18n.ocrText}</h3>
-                <button type="button" className="button ghost" onClick={handleSaveOcr} disabled={!selectedItem}>
-                  {i18n.saveOcr}
-                </button>
+                <div className="editor-actions">
+                  <button type="button" className="button ghost" onClick={() => openExpandedEditor('ocrDraft')} disabled={!selectedItem}>
+                    {i18n.enlargeEditor}
+                  </button>
+                  <button type="button" className="button ghost" onClick={handleSaveOcr} disabled={!selectedItem}>
+                    {i18n.saveOcr}
+                  </button>
+                </div>
               </div>
               <textarea
                 rows={10}
@@ -860,7 +968,12 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>{i18n.systemPrompt}</span>
+              <div className="field-header">
+                <span>{i18n.systemPrompt}</span>
+                <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekSystemPrompt')}>
+                  {i18n.enlargeEditor}
+                </button>
+              </div>
               <textarea
                 rows={5}
                 value={settings.deepseekSystemPrompt}
@@ -869,7 +982,12 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>{i18n.userPromptTemplate}</span>
+              <div className="field-header">
+                <span>{i18n.userPromptTemplate}</span>
+                <button type="button" className="button ghost editor-expand-button" onClick={() => openExpandedEditor('deepseekUserPromptTemplate')}>
+                  {i18n.enlargeEditor}
+                </button>
+              </div>
               <textarea
                 rows={7}
                 value={settings.deepseekUserPromptTemplate}
@@ -907,6 +1025,26 @@ export function App() {
             </button>
           </div>
         </aside>
+      </div>
+
+      <div className={`editor-modal ${expandedEditor ? 'open' : ''}`} aria-hidden={!expandedEditor}>
+        <div className="editor-modal-backdrop" onClick={closeExpandedEditor} />
+        <section className="editor-modal-panel" role="dialog" aria-modal="true" aria-label={expandedEditorTitle} onKeyDown={handleExpandedEditorKeyDown}>
+          <div className="editor-modal-header">
+            <h3>{expandedEditorTitle}</h3>
+            <button type="button" className="button ghost editor-modal-close" onClick={closeExpandedEditor} ref={closeExpandedEditorButtonRef}>
+              {i18n.closeEditor}
+            </button>
+          </div>
+          <textarea
+            className="editor-modal-textarea"
+            rows={16}
+            value={expandedEditorValue}
+            onChange={(event) => handleExpandedEditorChange(event.target.value)}
+            disabled={expandedEditor === 'ocrDraft' && !selectedItem}
+            ref={expandedTextareaRef}
+          />
+        </section>
       </div>
     </div>
   );

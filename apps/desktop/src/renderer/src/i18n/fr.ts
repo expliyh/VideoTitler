@@ -76,6 +76,8 @@ export const fr: UiText = {
   model: 'Modèle',
   systemPrompt: 'Prompt système',
   userPromptTemplate: 'Modèle de prompt utilisateur',
+  enlargeEditor: 'Agrandir l’éditeur',
+  closeEditor: 'Fermer l’éditeur',
   recentDirectories: 'Dossiers récents',
   recentDirsEmpty: 'Les dossiers récents apparaîtront ici après sauvegarde ou exécution de commandes.',
   saveSettings: 'Enregistrer les paramètres',

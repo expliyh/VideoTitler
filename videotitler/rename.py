@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 
-_WINDOWS_INVALID_CHARS_RE = re.compile(r"[<>:\"/\\\\|?*\\x00-\\x1F]")
+_WINDOWS_INVALID_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
 
 
 def sanitize_filename_component(text: str, *, fallback: str = "标题", max_len: int = 80) -> str:

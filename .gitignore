@@ -7,3 +7,10 @@ config.json
 
 # IDE
 .idea/
+
+# Node / Electron
+node_modules/
+pnpm-lock.yaml
+apps/desktop/dist/
+apps/desktop/release/
+packages/*/dist/

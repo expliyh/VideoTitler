@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@videotitler/core": ["../../packages/core/src/index.ts"],
+      "@renderer/*": ["src/renderer/src/*"]
+    }
+  },
+  "include": ["electron.vite.config.ts", "src"]
+}

@@ -4,6 +4,7 @@ import type {
   AppSettings,
   AppSettingsInput,
   ProcessingItem,
+  RenameSourceDirectoryResult,
   WorkerEvent,
   WorkerLifecycleEvent
 } from '@videotitler/core';
@@ -141,6 +142,14 @@ export class DesktopBackend {
     const worker = await this.ensureWorker();
     const payload = await worker.request<{ item: ProcessingItem }>('save_title_edit', { id, title });
     return payload.item;
+  }
+
+  async renameSourceDirectory(directory: string, newName: string): Promise<RenameSourceDirectoryResult> {
+    const worker = await this.ensureWorker();
+    return worker.request<RenameSourceDirectoryResult>('rename_source_directory', {
+      directory,
+      newName
+    });
   }
 
   async generateTitle(id: string, ocrText?: string): Promise<ProcessingItem> {

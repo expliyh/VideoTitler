@@ -97,6 +97,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle('worker:stop-processing', async () => getBackend().stopProcessing());
   ipcMain.handle('worker:save-ocr-edit', async (_event, args: { id: string; text: string }) => getBackend().saveOcrEdit(args.id, args.text));
   ipcMain.handle('worker:save-title-edit', async (_event, args: { id: string; title: string }) => getBackend().saveTitleEdit(args.id, args.title));
+  ipcMain.handle(
+    'worker:rename-source-directory',
+    async (_event, args: { directory: string; newName: string }) => getBackend().renameSourceDirectory(args.directory, args.newName)
+  );
   ipcMain.handle('worker:generate-title', async (_event, args: { id: string; ocrText?: string }) => getBackend().generateTitle(args.id, args.ocrText));
   ipcMain.handle('worker:rename-one', async (_event, args: { id: string; suggestedTitle?: string }) => getBackend().renameOne(args.id, args.suggestedTitle));
   ipcMain.handle('worker:rename-all', async (_event, settings: AppSettingsInput) => getBackend().renameAll(settings));

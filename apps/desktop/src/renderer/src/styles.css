@@ -203,6 +203,7 @@ textarea {
 }
 
 .directory-input-row,
+.directory-rename-row,
 .action-row,
 .toggle-row,
 .detail-actions,
@@ -214,6 +215,10 @@ textarea {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+
+.directory-rename-row input {
+  flex: 1 1 18rem;
 }
 
 .control-grid {

@@ -107,6 +107,7 @@ class DesktopWorker:
             "generate_title_from_ocr": self._handle_generate_title,
             "save_ocr_edit": self._handle_save_ocr_edit,
             "save_title_edit": self._handle_save_title_edit,
+            "rename_source_directory": self._handle_rename_source_directory,
             "rename_one": self._handle_rename_one,
             "rename_all": self._handle_rename_all,
             "get_items": self._handle_get_items,
@@ -224,6 +225,47 @@ class DesktopWorker:
         item.new_name = self._compute_target_path(item).name if item.suggested_title.strip() else ""
         self._emit_log(f"已保存标题：{item.file_name}")
         return {"item": self._serialize_item(item)}
+
+    def _handle_rename_source_directory(self, params: dict[str, object]) -> dict[str, object]:
+        self._ensure_not_busy()
+        directory = self._get_str(params, "directory", "inputDir") or self._config.input_dir
+        new_name = self._get_str(params, "new_name", "newName")
+        if not directory:
+            raise ValueError("Source directory is required.")
+        if not new_name:
+            raise ValueError("New directory name is required.")
+
+        source_dir = Path(directory)
+        if not source_dir.exists() or not source_dir.is_dir():
+            raise ValueError("Source directory does not exist.")
+        if source_dir.name == new_name:
+            raise ValueError("New directory name must be different.")
+
+        target_dir = source_dir.with_name(new_name)
+        if target_dir.exists():
+            raise ValueError("Target directory already exists.")
+
+        source_dir.rename(target_dir)
+
+        with self._lock:
+            self._config.input_dir = str(target_dir)
+            self._config.recent_dirs = self._replace_recent_dir_entries(
+                old_directory=str(source_dir),
+                new_directory=str(target_dir),
+            )
+            for item in self._items:
+                try:
+                    relative_path = item.path.relative_to(source_dir)
+                except ValueError:
+                    continue
+                item.path = target_dir / relative_path
+            save_non_secret_config(self._config_path, self._config)
+
+        return {
+            "inputDir": str(target_dir),
+            "recentDirs": list(self._config.recent_dirs),
+            "items": [self._serialize_item(item) for item in self._items],
+        }
 
     def _handle_rename_one(self, params: dict[str, object]) -> dict[str, object]:
         self._ensure_not_busy()
@@ -405,6 +447,24 @@ class DesktopWorker:
             return
         existing = [entry for entry in self._config.recent_dirs if entry != directory]
         self._config.recent_dirs = [directory, *existing][:10]
+
+    def _replace_recent_dir_entries(self, *, old_directory: str, new_directory: str) -> list[str]:
+        updated_entries: list[str] = []
+        replaced = False
+
+        for entry in self._config.recent_dirs:
+            if entry == old_directory:
+                if new_directory not in updated_entries:
+                    updated_entries.append(new_directory)
+                replaced = True
+                continue
+            if entry != new_directory:
+                updated_entries.append(entry)
+
+        if not replaced:
+            updated_entries = [new_directory, *updated_entries]
+
+        return updated_entries[:10]
 
     def _serialize_settings(self, config: AppConfig) -> dict[str, object]:
         return {

@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { ProcessingItem, ProcessingSessionState } from '@videotitler/core';
-import { applyWorkerEvent, createInitialSessionState, createInitialUiState } from './app-state.ts';
+import {
+  applyRenamedSourceDirectoryItems,
+  applyWorkerEvent,
+  createInitialSessionState,
+  createInitialUiState
+} from './app-state.ts';
 
 function makeItem(overrides: Partial<ProcessingItem> = {}): ProcessingItem {
   return {
@@ -103,4 +108,21 @@ test('applyWorkerEvent replaces the list on scan and selects the first row when 
 
   assert.equal(next.items.length, 2);
   assert.equal(next.selectedItemId, 'item-1');
+});
+
+test('applyRenamedSourceDirectoryItems keeps the selected row when item ids stay the same', () => {
+  const initial = createInitialUiState();
+  initial.items = [
+    makeItem({ id: 'item-1', fullPath: 'C:/videos/source/clip1.mp4' }),
+    makeItem({ id: 'item-2', fileName: 'clip2.mp4', fullPath: 'C:/videos/source/clip2.mp4' })
+  ];
+  initial.selectedItemId = 'item-2';
+
+  const next = applyRenamedSourceDirectoryItems(initial, [
+    makeItem({ id: 'item-1', fullPath: 'C:/videos/renamed/clip1.mp4' }),
+    makeItem({ id: 'item-2', fileName: 'clip2.mp4', fullPath: 'C:/videos/renamed/clip2.mp4' })
+  ]);
+
+  assert.equal(next.selectedItemId, 'item-2');
+  assert.equal(next.items[1]?.fullPath, 'C:/videos/renamed/clip2.mp4');
 });

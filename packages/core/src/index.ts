@@ -71,6 +71,12 @@ export type ProcessingItem = {
   previewDataUrl: string;
 };
 
+export type RenameSourceDirectoryResult = {
+  inputDir: string;
+  recentDirs: string[];
+  items: ProcessingItem[];
+};
+
 export type ProcessingSessionState = {
   isProcessing: boolean;
   activeCommand: 'idle' | 'processing' | 'renaming';

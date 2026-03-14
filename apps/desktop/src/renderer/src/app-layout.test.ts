@@ -10,3 +10,9 @@ test('App syncs the left list height from the right detail card on desktop', () 
   assert.match(appSource, /matchMedia\('\(min-width:\s*1181px\)'\)/);
   assert.match(appSource, /ref=\{detailCardRef\}/);
 });
+
+test('App exposes an inline source-directory rename action', () => {
+  assert.match(appSource, /handleRenameSourceDirectory/);
+  assert.match(appSource, /renameSourceDirectory/);
+  assert.match(appSource, /i18n\.renameSourceDirectory/);
+});

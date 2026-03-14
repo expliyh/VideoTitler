@@ -10,7 +10,12 @@ export default defineConfig({
   },
   preload: {
     build: {
-      outDir: 'dist/preload'
+      outDir: 'dist/preload',
+      rollupOptions: {
+        output: {
+          format: 'cjs'
+        }
+      }
     }
   },
   renderer: {

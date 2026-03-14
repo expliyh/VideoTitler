@@ -1,15 +1,71 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useAppStore } from './store';
+
+function buildDebugLog(message: string): string {
+  return `[${new Date().toLocaleTimeString()}] [debug:renderer] ${message}`;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack ?? error.message;
+  }
+  return String(error);
+}
 
 export function App() {
   const { directory, frameNumber, videos, logs } = useAppStore();
   const { setDirectory, setFrameNumber, setVideos, mergeVideo, appendLogs } = useAppStore();
+  const didInitDiagnostics = useRef(false);
 
   const selectedIds = useMemo(() => videos.map((item) => item.id), [videos]);
 
+  useEffect(() => {
+    if (didInitDiagnostics.current) {
+      return;
+    }
+
+    didInitDiagnostics.current = true;
+    appendLogs([
+      buildDebugLog(`mounted; typeof window.videoTitlerApi.selectDirectory = ${typeof window.videoTitlerApi?.selectDirectory}`)
+    ]);
+
+    const unsubscribe = window.videoTitlerApi?.onDebugLog?.((message) => {
+      appendLogs([message]);
+    });
+
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      appendLogs([buildDebugLog(`unhandledrejection: ${formatError(event.reason)}`)]);
+    };
+
+    const onWindowError = (event: ErrorEvent) => {
+      appendLogs([buildDebugLog(`window error: ${event.message}`)]);
+    };
+
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    window.addEventListener('error', onWindowError);
+
+    return () => {
+      unsubscribe?.();
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+      window.removeEventListener('error', onWindowError);
+    };
+  }, [appendLogs]);
+
   const onSelectDirectory = async () => {
-    const selected = await window.videoTitlerApi.selectDirectory();
-    if (selected) setDirectory(selected);
+    appendLogs([buildDebugLog('select-directory button clicked')]);
+
+    if (typeof window.videoTitlerApi?.selectDirectory !== 'function') {
+      appendLogs([buildDebugLog('window.videoTitlerApi.selectDirectory is unavailable')]);
+      return;
+    }
+
+    try {
+      const selected = await window.videoTitlerApi.selectDirectory();
+      appendLogs([buildDebugLog(`selectDirectory resolved with ${selected ?? 'null'}`)]);
+      if (selected) setDirectory(selected);
+    } catch (error) {
+      appendLogs([buildDebugLog(`selectDirectory threw: ${formatError(error)}`)]);
+    }
   };
 
   const onScan = async () => {
@@ -32,14 +88,16 @@ export function App() {
     appendLogs(result.logs);
   };
 
-  const onRenameOne = async (id: string, index: number) => {
-    const result = await window.videoTitlerApi.renameOne(id, index);
+  const onRenameOne = async (id: string, index: number, suggestedTitle: string) => {
+    const result = await window.videoTitlerApi.renameOne(id, index, suggestedTitle);
     if (result.video) mergeVideo(result.video);
     appendLogs(result.logs);
   };
 
   const onRenameAll = async () => {
-    const result = await window.videoTitlerApi.renameAll(selectedIds);
+    const result = await window.videoTitlerApi.renameAll(
+      videos.map((video) => ({ id: video.id, suggestedTitle: video.suggestedTitle }))
+    );
     result.videos.forEach(mergeVideo);
     appendLogs(result.logs);
   };
@@ -51,7 +109,12 @@ export function App() {
       <section className="card controls">
         <h2>目录扫描 / 帧号设置</h2>
         <div className="row">
-          <button onClick={onSelectDirectory}>选择目录</button>
+          <button
+            onPointerDown={() => appendLogs([buildDebugLog('select-directory button pointerdown')])}
+            onClick={onSelectDirectory}
+          >
+            选择目录
+          </button>
           <input value={directory} readOnly placeholder="未选择目录" />
           <button onClick={onScan} disabled={!directory}>扫描</button>
         </div>
@@ -101,7 +164,7 @@ export function App() {
                 <td>
                   <div className="row">
                     <button onClick={() => onGenerateTitle(video.id, video.ocrText)}>生成标题</button>
-                    <button onClick={() => onRenameOne(video.id, index + 1)}>重命名</button>
+                    <button onClick={() => onRenameOne(video.id, index + 1, video.suggestedTitle)}>重命名</button>
                   </div>
                 </td>
               </tr>

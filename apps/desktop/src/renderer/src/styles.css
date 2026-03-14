@@ -329,6 +329,8 @@ textarea {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.85rem;
+  min-height: 0;
+  height: 100%;
 }
 
 .empty-state,
@@ -345,7 +347,9 @@ textarea {
 }
 
 .video-summary-scroll {
-  max-height: min(58vh, 44rem);
+  height: 100%;
+  min-height: 22rem;
+  max-height: min(78vh, calc(100vh - 18rem));
   overflow: auto;
   padding-right: 0.3rem;
   margin-right: -0.2rem;
@@ -656,7 +660,8 @@ textarea {
   }
 
   .video-summary-scroll {
-    max-height: 52vh;
+    min-height: 18rem;
+    max-height: 58vh;
   }
 
   .settings-panel {

@@ -1,8 +1,58 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { AppSettings, AppSettingsInput, ProcessingItem, WorkerLifecycleEvent } from '@videotitler/core';
+import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
 
 import { applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
+
+
+const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['en', 'zh', 'fr'];
+
+type I18nBundle = {
+  languageLabel: string;
+  useSystemLanguage: string;
+  english: string;
+  chinese: string;
+  french: string;
+  settingsSaved: string;
+};
+
+const I18N_TEXT: Record<SupportedLanguage, I18nBundle> = {
+  en: {
+    languageLabel: 'App language',
+    useSystemLanguage: 'Follow system language',
+    english: 'English',
+    chinese: 'Chinese',
+    french: 'French',
+    settingsSaved: 'Settings saved.'
+  },
+  zh: {
+    languageLabel: '界面语言',
+    useSystemLanguage: '跟随系统语言',
+    english: '英语',
+    chinese: '中文',
+    french: '法语',
+    settingsSaved: '设置已保存。'
+  },
+  fr: {
+    languageLabel: "Langue de l'application",
+    useSystemLanguage: 'Suivre la langue du système',
+    english: 'Anglais',
+    chinese: 'Chinois',
+    french: 'Français',
+    settingsSaved: 'Paramètres enregistrés.'
+  }
+};
+
+function normalizeSupportedLanguage(value: string): SupportedLanguage {
+  const normalized = value.toLowerCase();
+  if (normalized.startsWith('zh')) {
+    return 'zh';
+  }
+  if (normalized.startsWith('fr')) {
+    return 'fr';
+  }
+  return 'en';
+}
 
 type SecretDraftState = {
   baiduApiKey: string;
@@ -34,6 +84,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   deepseekModel: 'deepseek-chat',
   deepseekSystemPrompt: 'Extract one short video title from the OCR text. Return the title only.',
   deepseekUserPromptTemplate: 'OCR text:\n{ocr_text}\n\nReturn one short title only.',
+  uiLanguage: 'system',
   recentDirs: [],
   secretsState: {
     hasBaiduApiKey: false,
@@ -63,6 +114,7 @@ function buildSettingsInput(settings: AppSettings, secretDraft: SecretDraftState
     deepseekModel: settings.deepseekModel,
     deepseekSystemPrompt: settings.deepseekSystemPrompt,
     deepseekUserPromptTemplate: settings.deepseekUserPromptTemplate,
+    uiLanguage: settings.uiLanguage,
     recentDirs: settings.recentDirs,
     baiduApiKey: secretDraft.baiduApiKey,
     baiduSecretKey: secretDraft.baiduSecretKey,
@@ -137,6 +189,14 @@ export function App() {
   const canStartProcessing = uiState.items.length > 0 && !uiState.session.isProcessing;
   const canRenameAll = uiState.items.length > 0 && !uiState.session.isProcessing;
   const canStop = uiState.session.isProcessing;
+  const systemLanguage = useMemo<SupportedLanguage>(() => {
+    if (typeof navigator === 'undefined') {
+      return 'en';
+    }
+    return normalizeSupportedLanguage(navigator.language);
+  }, []);
+  const effectiveLanguage = settings.uiLanguage === 'system' ? systemLanguage : settings.uiLanguage;
+  const i18n = I18N_TEXT[effectiveLanguage];
 
   useEffect(() => {
     if (!api) {
@@ -228,7 +288,7 @@ export function App() {
       const savedSettings = await api.saveSettings(buildSettingsInput(settings, secretDraft));
       applySavedSettings(savedSettings);
       if (options?.announce) {
-        appendLog('Settings saved.');
+        appendLog(i18n.settingsSaved);
       }
       return savedSettings;
     } finally {
@@ -746,6 +806,24 @@ export function App() {
               Close
             </button>
           </div>
+
+          <section className="settings-section">
+            <h3>{i18n.languageLabel}</h3>
+            <label className="field">
+              <span>{i18n.languageLabel}</span>
+              <select
+                value={settings.uiLanguage}
+                onChange={(event) => setSettings((previous) => ({ ...previous, uiLanguage: event.target.value as LanguageSetting }))}
+              >
+                <option value="system">{`${i18n.useSystemLanguage} (${I18N_TEXT[systemLanguage].languageLabel})`}</option>
+                {SUPPORTED_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {language === 'en' ? i18n.english : language === 'zh' ? i18n.chinese : i18n.french}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
 
           <section className="settings-section">
             <h3>Secure API keys</h3>

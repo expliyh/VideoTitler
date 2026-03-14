@@ -419,6 +419,7 @@ class DesktopWorker:
             "deepseekModel": config.deepseek_model,
             "deepseekSystemPrompt": config.deepseek_system_prompt,
             "deepseekUserPromptTemplate": config.deepseek_user_prompt_template,
+            "uiLanguage": config.ui_language,
             "recentDirs": list(config.recent_dirs),
         }
 
@@ -513,10 +514,18 @@ class DesktopWorker:
             self._get_str(values, "deepseek_user_prompt_template", "deepseekUserPromptTemplate")
             or config.deepseek_user_prompt_template
         )
+        config.ui_language = self._normalize_language(self._get_str(values, "ui_language", "uiLanguage") or config.ui_language)
         recent_dirs = values.get("recent_dirs", values.get("recentDirs"))
         if isinstance(recent_dirs, list):
             config.recent_dirs = [str(entry) for entry in recent_dirs if str(entry).strip()]
         return config
+
+
+    def _normalize_language(self, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized in {"en", "zh", "fr", "system"}:
+            return normalized
+        return "system"
 
     def _normalize_secrets(self, values: dict[str, object]) -> dict[str, str]:
         baidu_api_key = self._get_str(values, "baidu_api_key", "baiduApiKey")

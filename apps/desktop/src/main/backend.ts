@@ -46,6 +46,7 @@ function toWorkerSettingsPayload(settings: AppSettingsInput): WorkerSettingsPayl
     deepseekModel: settings.deepseekModel,
     deepseekSystemPrompt: settings.deepseekSystemPrompt,
     deepseekUserPromptTemplate: settings.deepseekUserPromptTemplate,
+    uiLanguage: settings.uiLanguage,
     recentDirs: settings.recentDirs
   };
 }

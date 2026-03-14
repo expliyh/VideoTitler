@@ -50,6 +50,34 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertEqual(loaded.baidu_secret_key, "")
             self.assertEqual(loaded.deepseek_api_key, "")
 
+
+    def test_save_settings_supports_ui_language_and_falls_back_to_system(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            worker = self._create_worker(root / "settings.json")
+
+            saved = worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "uiLanguage": "fr",
+                    }
+                },
+            )
+            self.assertEqual(saved["settings"]["uiLanguage"], "fr")
+
+            fallback = worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "uiLanguage": "jp",
+                    }
+                },
+            )
+            self.assertEqual(fallback["settings"]["uiLanguage"], "system")
+
     def test_scan_videos_supports_subdirs_and_natural_sort(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

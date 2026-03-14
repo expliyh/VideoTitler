@@ -1,47 +1,49 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { RenameRequestItem, VideoRecord } from '@videotitler/core';
 
-export type ScanResponse = { videos: VideoRecord[]; logs: string[] };
+import type {
+  AppSettings,
+  AppSettingsInput,
+  ProcessingItem,
+  WorkerEvent,
+  WorkerLifecycleEvent
+} from '@videotitler/core';
 
-function logPreload(message: string, payload?: unknown): void {
-  if (payload === undefined) {
-    console.info(`[preload] ${message}`);
-    return;
-  }
-  console.info(`[preload] ${message}`, payload);
-}
+type Unsubscribe = () => void;
 
 async function invoke<T>(channel: string, payload?: unknown): Promise<T> {
-  logPreload(`invoke ${channel}`, payload);
-  try {
-    const result = payload === undefined
-      ? await ipcRenderer.invoke(channel)
-      : await ipcRenderer.invoke(channel, payload);
-    logPreload(`invoke ${channel} resolved`, result);
-    return result as T;
-  } catch (error) {
-    console.error(`[preload] invoke ${channel} failed`, error);
-    throw error;
+  if (payload === undefined) {
+    return ipcRenderer.invoke(channel) as Promise<T>;
   }
+
+  return ipcRenderer.invoke(channel, payload) as Promise<T>;
+}
+
+function subscribe<T>(channel: string, callback: (payload: T) => void): Unsubscribe {
+  const listener = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
 }
 
 const api = {
-  selectDirectory: (): Promise<string | null> => invoke('dialog:select-directory'),
-  scanVideos: (directory: string, frameNumber: number): Promise<ScanResponse> =>
-    invoke('videos:scan', { directory, frameNumber }),
-  updateFrameNumber: (ids: string[], frameNumber: number): Promise<ScanResponse> =>
-    invoke('videos:update-frame', { ids, frameNumber }),
-  generateTitle: (id: string, ocrText?: string): Promise<{ video: VideoRecord | null; logs: string[] }> =>
-    invoke('videos:generate-title', { id, ocrText }),
-  renameOne: (id: string, index: number, suggestedTitle: string): Promise<{ video: VideoRecord | null; logs: string[] }> =>
-    invoke('videos:rename-one', { id, index, suggestedTitle }),
-  renameAll: (items: RenameRequestItem[]): Promise<{ videos: VideoRecord[]; logs: string[] }> =>
-    invoke('videos:rename-all', { items }),
-  onDebugLog: (callback: (message: string) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
-    ipcRenderer.on('debug:log', listener);
-    return () => ipcRenderer.removeListener('debug:log', listener);
-  }
+  loadSettings: (): Promise<AppSettings> => invoke('app:load-settings'),
+  saveSettings: (settings: AppSettingsInput): Promise<AppSettings> => invoke('app:save-settings', settings),
+  selectDirectory: (defaultPath?: string): Promise<string | null> =>
+    invoke('dialog:select-directory', defaultPath ? { defaultPath } : undefined),
+  openDirectory: (targetPath: string): Promise<void> => invoke('shell:open-directory', targetPath),
+  scanVideos: (args: { directory: string; includeSubdirs: boolean }): Promise<ProcessingItem[]> =>
+    invoke('worker:scan-videos', args),
+  startProcessing: (settings: AppSettingsInput): Promise<void> => invoke('worker:start-processing', settings),
+  stopProcessing: (): Promise<void> => invoke('worker:stop-processing'),
+  saveOcrEdit: (id: string, text: string): Promise<ProcessingItem> => invoke('worker:save-ocr-edit', { id, text }),
+  saveTitleEdit: (id: string, title: string): Promise<ProcessingItem> => invoke('worker:save-title-edit', { id, title }),
+  generateTitle: (id: string, ocrText?: string): Promise<ProcessingItem> =>
+    invoke('worker:generate-title', { id, ocrText }),
+  renameOne: (id: string, suggestedTitle?: string): Promise<ProcessingItem> =>
+    invoke('worker:rename-one', { id, suggestedTitle }),
+  renameAll: (settings: AppSettingsInput): Promise<void> => invoke('worker:rename-all', settings),
+  onWorkerEvent: (callback: (event: WorkerEvent) => void): Unsubscribe => subscribe('worker:event', callback),
+  onWorkerLifecycle: (callback: (event: WorkerLifecycleEvent) => void): Unsubscribe =>
+    subscribe('worker:lifecycle', callback)
 };
 
 contextBridge.exposeInMainWorld('videoTitlerApi', api);

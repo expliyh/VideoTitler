@@ -41,6 +41,22 @@ class AppConfig:
     recent_dirs: list[str] = field(default_factory=list)
 
 
+_NON_SECRET_FIELDS = {
+    "input_dir",
+    "include_subdirs",
+    "frame_number_1based",
+    "start_index",
+    "index_padding",
+    "dry_run",
+    "baidu_ocr_mode",
+    "deepseek_base_url",
+    "deepseek_model",
+    "deepseek_system_prompt",
+    "deepseek_user_prompt_template",
+    "recent_dirs",
+}
+
+
 def default_config_path() -> Path:
     return Path.cwd() / "config.json"
 
@@ -68,6 +84,29 @@ def save_config(path: Path, config: AppConfig) -> None:
         data["baidu_secret_key"] = ""
         data["deepseek_api_key"] = ""
 
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_non_secret_config(path: Path) -> AppConfig:
+    config = load_config(path)
+    config.baidu_api_key = ""
+    config.baidu_secret_key = ""
+    config.deepseek_api_key = ""
+    config.save_keys_locally = False
+    return config
+
+
+def save_non_secret_config(path: Path, config: AppConfig) -> None:
+    data = {
+        key: value
+        for key, value in asdict(config).items()
+        if key in _NON_SECRET_FIELDS
+    }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",

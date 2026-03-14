@@ -23,6 +23,141 @@ export type RenameRequestItem = {
   suggestedTitle: string;
 };
 
+export type OcrMode = 'accurate_basic' | 'general_basic';
+
+export type AppSecretsState = {
+  hasBaiduApiKey: boolean;
+  hasBaiduSecretKey: boolean;
+  hasDeepseekApiKey: boolean;
+};
+
+export type AppSettings = {
+  inputDir: string;
+  includeSubdirs: boolean;
+  frameNumber: number;
+  startIndex: number;
+  indexPadding: number;
+  dryRun: boolean;
+  ocrMode: OcrMode;
+  deepseekBaseUrl: string;
+  deepseekModel: string;
+  deepseekSystemPrompt: string;
+  deepseekUserPromptTemplate: string;
+  recentDirs: string[];
+  secretsState: AppSecretsState;
+};
+
+export type AppSettingsInput = Omit<AppSettings, 'secretsState'> & {
+  baiduApiKey?: string;
+  baiduSecretKey?: string;
+  deepseekApiKey?: string;
+  clearBaiduApiKey?: boolean;
+  clearBaiduSecretKey?: boolean;
+  clearDeepseekApiKey?: boolean;
+};
+
+export type ProcessingItem = {
+  id: string;
+  fullPath: string;
+  fileName: string;
+  status: string;
+  ocrText: string;
+  suggestedTitle: string;
+  newName: string;
+  error: string;
+  previewDataUrl: string;
+};
+
+export type ProcessingSessionState = {
+  isProcessing: boolean;
+  activeCommand: 'idle' | 'processing' | 'renaming';
+  progressCurrent: number;
+  progressTotal: number;
+  lastDoneMessage: string;
+};
+
+export type WorkerLogEvent = {
+  event: 'log';
+  message: string;
+};
+
+export type WorkerScanResultEvent = {
+  event: 'scan_result';
+  items: ProcessingItem[];
+};
+
+export type WorkerItemPreviewEvent = {
+  event: 'item_preview';
+  id: string;
+  previewDataUrl: string;
+};
+
+export type WorkerItemOcrEvent = {
+  event: 'item_ocr';
+  id: string;
+  ocrText: string;
+};
+
+export type WorkerItemTitleEvent = {
+  event: 'item_title';
+  id: string;
+  suggestedTitle: string;
+  newName: string;
+};
+
+export type WorkerItemStatusEvent = {
+  event: 'item_status';
+  id: string;
+  status: string;
+  error: string;
+};
+
+export type WorkerItemRenamedEvent = {
+  event: 'item_renamed';
+  id: string;
+  oldFullPath: string;
+  oldFileName: string;
+  fullPath: string;
+  fileName: string;
+  newName: string;
+};
+
+export type WorkerProgressEvent = {
+  event: 'progress';
+  current: number;
+  total: number;
+};
+
+export type WorkerDoneEvent = {
+  event: 'done';
+  message: string;
+};
+
+export type WorkerErrorEvent = {
+  event: 'error';
+  id?: string;
+  fileName?: string;
+  fullPath?: string;
+  message: string;
+};
+
+export type WorkerEvent =
+  | WorkerLogEvent
+  | WorkerScanResultEvent
+  | WorkerItemPreviewEvent
+  | WorkerItemOcrEvent
+  | WorkerItemTitleEvent
+  | WorkerItemStatusEvent
+  | WorkerItemRenamedEvent
+  | WorkerProgressEvent
+  | WorkerDoneEvent
+  | WorkerErrorEvent;
+
+export type WorkerLifecycleEvent = {
+  state: 'starting' | 'ready' | 'stopped' | 'error';
+  message: string;
+};
+
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v']);
 
 export function isVideoFile(fileName: string): boolean {

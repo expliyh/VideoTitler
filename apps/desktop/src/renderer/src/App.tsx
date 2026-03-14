@@ -628,23 +628,25 @@ export function App() {
                 <p>{i18n.stepsHint}</p>
               </div>
             ) : (
-              <div className="video-summary-list" role="list">
-                {uiState.items.map((item) => (
-                  <VideoSummaryItem
-                    key={item.id}
-                    item={item}
-                    isSelected={item.id === uiState.selectedItemId}
-                    fallbackIdleLabel={i18n.idle}
-                    statusTone={getStatusTone(item)}
-                    labels={{
-                      file: i18n.tableFile,
-                      status: i18n.tableStatus,
-                      suggestedTitle: i18n.tableSuggestedTitle,
-                      targetFilename: i18n.tableTargetFilename
-                    }}
-                    onSelect={() => setUiState((previous) => ({ ...previous, selectedItemId: item.id }))}
-                  />
-                ))}
+              <div className="video-summary-scroll" role="region" aria-label={i18n.scannedVideos}>
+                <div className="video-summary-list" role="list">
+                  {uiState.items.map((item) => (
+                    <VideoSummaryItem
+                      key={item.id}
+                      item={item}
+                      isSelected={item.id === uiState.selectedItemId}
+                      fallbackIdleLabel={i18n.idle}
+                      statusTone={getStatusTone(item)}
+                      labels={{
+                        file: i18n.tableFile,
+                        status: i18n.tableStatus,
+                        suggestedTitle: i18n.tableSuggestedTitle,
+                        targetFilename: i18n.tableTargetFilename
+                      }}
+                      onSelect={() => setUiState((previous) => ({ ...previous, selectedItemId: item.id }))}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </section>

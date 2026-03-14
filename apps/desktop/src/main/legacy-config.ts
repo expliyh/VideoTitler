@@ -27,6 +27,7 @@ const NON_SECRET_FIELDS = [
   'deepseek_model',
   'deepseek_system_prompt',
   'deepseek_user_prompt_template',
+  'ui_language',
   'recent_dirs'
 ] as const;
 

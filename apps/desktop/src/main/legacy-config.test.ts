@@ -41,6 +41,7 @@ test('migrateLegacyConfigIfNeeded copies legacy settings and secrets when no new
         deepseek_model: 'deepseek-chat',
         deepseek_system_prompt: 'system prompt',
         deepseek_user_prompt_template: 'user {ocr_text}',
+        ui_language: 'fr',
         save_keys_locally: true,
         recent_dirs: ['C:/videos']
       },
@@ -63,6 +64,7 @@ test('migrateLegacyConfigIfNeeded copies legacy settings and secrets when no new
   assert.equal(rawSettings.include_subdirs, true);
   assert.equal(rawSettings.baidu_api_key, undefined);
   assert.equal(rawSettings.deepseek_api_key, undefined);
+  assert.equal(rawSettings.ui_language, 'fr');
 
   assert.deepEqual(await secretStore.read(), {
     baiduApiKey: 'legacy-baidu-key',

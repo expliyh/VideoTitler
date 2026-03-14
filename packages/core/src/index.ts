@@ -24,6 +24,8 @@ export type RenameRequestItem = {
 };
 
 export type OcrMode = 'accurate_basic' | 'general_basic';
+export type SupportedLanguage = 'en' | 'zh' | 'fr';
+export type LanguageSetting = 'system' | SupportedLanguage;
 
 export type AppSecretsState = {
   hasBaiduApiKey: boolean;
@@ -43,6 +45,7 @@ export type AppSettings = {
   deepseekModel: string;
   deepseekSystemPrompt: string;
   deepseekUserPromptTemplate: string;
+  uiLanguage: LanguageSetting;
   recentDirs: string[];
   secretsState: AppSecretsState;
 };

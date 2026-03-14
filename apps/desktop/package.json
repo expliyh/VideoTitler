@@ -6,12 +6,13 @@
   "main": "dist/main/index.js",
   "scripts": {
     "ensure:electron": "node ./scripts/ensure-electron.mjs",
-    "predev": "node ./scripts/ensure-electron.mjs",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "predev": "node ./scripts/ensure-electron.mjs && node ./scripts/ensure-desktop-tooling.mjs",
+    "dev": "pnpm exec electron-vite dev",
+    "build": "pnpm exec electron-vite build",
     "predist": "node ./scripts/ensure-electron.mjs",
-    "dist": "electron-builder --publish never",
-    "typecheck": "tsc --noEmit"
+    "dist": "pnpm exec electron-builder --publish never",
+    "typecheck": "tsc --noEmit",
+    "prebuild": "node ./scripts/ensure-desktop-tooling.mjs"
   },
   "dependencies": {
     "@videotitler/core": "workspace:*",

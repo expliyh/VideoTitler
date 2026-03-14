@@ -36,6 +36,8 @@ class AppConfig:
         "输出要求：只输出标题一行。"
     )
 
+    ui_language: str = "system"
+
     # UX
     save_keys_locally: bool = False
     recent_dirs: list[str] = field(default_factory=list)
@@ -53,6 +55,7 @@ _NON_SECRET_FIELDS = {
     "deepseek_model",
     "deepseek_system_prompt",
     "deepseek_user_prompt_template",
+    "ui_language",
     "recent_dirs",
 }
 

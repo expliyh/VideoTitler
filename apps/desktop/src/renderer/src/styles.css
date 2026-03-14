@@ -349,7 +349,7 @@ textarea {
 .video-summary-scroll {
   height: 100%;
   min-height: 22rem;
-  max-height: min(78vh, calc(100vh - 18rem));
+  max-height: clamp(26rem, calc(100vh - 11.5rem), 84vh);
   overflow: auto;
   padding-right: 0.3rem;
   margin-right: -0.2rem;
@@ -661,7 +661,7 @@ textarea {
 
   .video-summary-scroll {
     min-height: 18rem;
-    max-height: 58vh;
+    max-height: 64vh;
   }
 
   .settings-panel {

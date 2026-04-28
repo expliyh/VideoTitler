@@ -274,7 +274,7 @@ class VideoTitlerApp:
         self._baidu_secret_key_var = ttk.StringVar(value="")
         self._deepseek_api_key_var = ttk.StringVar(value="")
         self._deepseek_base_url_var = ttk.StringVar(value="https://api.deepseek.com/v1")
-        self._deepseek_model_var = ttk.StringVar(value="deepseek-chat")
+        self._deepseek_model_var = ttk.StringVar(value="deepseek-v4-pro")
         self._save_keys_var = ttk.BooleanVar(value=False)
 
         grid = ttk.Frame(tab_keys)
@@ -536,7 +536,7 @@ class VideoTitlerApp:
         self._ocr_mode_var.set((cfg.baidu_ocr_mode or "accurate_basic").strip())
 
         self._deepseek_base_url_var.set(cfg.deepseek_base_url or "https://api.deepseek.com/v1")
-        self._deepseek_model_var.set(cfg.deepseek_model or "deepseek-chat")
+        self._deepseek_model_var.set(cfg.deepseek_model or "deepseek-v4-pro")
         self._save_keys_var.set(bool(cfg.save_keys_locally))
         self._ds_system_prompt_text.delete("1.0", END)
         self._ds_system_prompt_text.insert(END, cfg.deepseek_system_prompt or "")
@@ -561,7 +561,7 @@ class VideoTitlerApp:
         cfg.baidu_secret_key = self._baidu_secret_key_var.get().strip()
         cfg.deepseek_api_key = self._deepseek_api_key_var.get().strip()
         cfg.deepseek_base_url = self._deepseek_base_url_var.get().strip() or "https://api.deepseek.com/v1"
-        cfg.deepseek_model = self._deepseek_model_var.get().strip() or "deepseek-chat"
+        cfg.deepseek_model = self._deepseek_model_var.get().strip() or "deepseek-v4-pro"
         cfg.save_keys_locally = bool(self._save_keys_var.get())
         cfg.deepseek_system_prompt = self._ds_system_prompt_text.get("1.0", END).strip()
         cfg.deepseek_user_prompt_template = self._ds_user_prompt_text.get("1.0", END).strip()

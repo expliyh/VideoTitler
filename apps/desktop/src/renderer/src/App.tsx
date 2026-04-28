@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   dryRun: false,
   ocrMode: 'accurate_basic',
   deepseekBaseUrl: 'https://api.deepseek.com/v1',
-  deepseekModel: 'deepseek-chat',
+  deepseekModel: 'deepseek-v4-pro',
   deepseekSystemPrompt: 'Extract one short video title from the OCR text. Return the title only.',
   deepseekUserPromptTemplate: 'OCR text:\n{ocr_text}\n\nReturn one short title only.',
   uiLanguage: 'system',

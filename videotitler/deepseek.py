@@ -66,7 +66,7 @@ def extract_title_sentence(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": (model or "deepseek-chat"),
+                    "model": (model or "deepseek-v4-pro"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},

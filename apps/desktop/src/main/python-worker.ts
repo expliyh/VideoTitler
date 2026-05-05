@@ -154,7 +154,7 @@ export class PythonWorkerClient extends EventEmitter {
     try {
       envelope = JSON.parse(line) as WorkerEnvelope;
     } catch (error) {
-      this.emit('error', error instanceof Error ? error : new Error(String(error)));
+      this.emit('stdout', line);
       return;
     }
     if (envelope.type === 'event') {

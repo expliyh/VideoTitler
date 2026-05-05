@@ -26,6 +26,7 @@ class DesktopWorkerTests(unittest.TestCase):
                 deepseek_api_key="deepseek-key",
                 deepseek_base_url="https://api.deepseek.com/v1",
                 deepseek_model="deepseek-chat",
+                deepseek_thinking_enabled=False,
                 deepseek_system_prompt="system",
                 deepseek_user_prompt_template="user {ocr_text}",
                 recent_dirs=["C:/videos", "D:/clips"],
@@ -43,12 +44,32 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertEqual(loaded.baidu_ocr_mode, "accurate_basic")
             self.assertEqual(loaded.deepseek_base_url, "https://api.deepseek.com/v1")
             self.assertEqual(loaded.deepseek_model, "deepseek-chat")
+            self.assertFalse(loaded.deepseek_thinking_enabled)
             self.assertEqual(loaded.deepseek_system_prompt, "system")
             self.assertEqual(loaded.deepseek_user_prompt_template, "user {ocr_text}")
             self.assertEqual(loaded.recent_dirs, ["C:/videos", "D:/clips"])
             self.assertEqual(loaded.baidu_api_key, "")
             self.assertEqual(loaded.baidu_secret_key, "")
             self.assertEqual(loaded.deepseek_api_key, "")
+
+    def test_save_settings_supports_deepseek_thinking_mode(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            worker = self._create_worker(root / "settings.json")
+
+            saved = worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "deepseekThinkingEnabled": False,
+                    }
+                },
+            )
+
+            self.assertFalse(saved["settings"]["deepseekThinkingEnabled"])
+            loaded = worker.handle_request("load_settings", {})
+            self.assertFalse(loaded["settings"]["deepseekThinkingEnabled"])
 
 
     def test_save_settings_supports_ui_language_and_falls_back_to_system(self) -> None:
@@ -130,6 +151,7 @@ class DesktopWorkerTests(unittest.TestCase):
                 self.assertEqual(kwargs["api_key"], "deepseek-key")
                 self.assertEqual(kwargs["base_url"], "https://api.deepseek.com/v1")
                 self.assertEqual(kwargs["model"], "deepseek-chat")
+                self.assertTrue(kwargs["thinking_enabled"])
                 self.assertEqual(kwargs["ocr_text"], "OCR TEXT")
                 return "Action Title"
 
@@ -185,6 +207,67 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertEqual(items["items"][0]["suggestedTitle"], "Action Title")
             self.assertEqual(items["items"][0]["newName"], "001-Action Title.mp4")
             self.assertEqual(items["items"][1]["newName"], "002-Action Title.m4v")
+
+    def test_generate_title_preserves_deepseek_raw_text(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(b"")
+            events: list[dict[str, object]] = []
+
+            def title_extractor(**kwargs: object) -> dict[str, str]:
+                self.assertEqual(kwargs["ocr_text"], "OCR TEXT")
+                self.assertTrue(kwargs["thinking_enabled"])
+                return {
+                    "title": "Action Title",
+                    "raw_text": "Action Title\nreasoning and alternate wording",
+                }
+
+            worker = self._create_worker(
+                root / "settings.json",
+                emit=events.append,
+                title_extractor=title_extractor,
+            )
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "deepseek_base_url": "https://api.deepseek.com/v1",
+                        "deepseek_model": "deepseek-chat",
+                        "deepseek_system_prompt": "system",
+                        "deepseek_user_prompt_template": "user {ocr_text}",
+                    }
+                },
+            )
+            scan_result = worker.handle_request("scan_videos", {"directory": str(root), "include_subdirs": False})
+            item_id = scan_result["items"][0]["id"]
+            worker.handle_request("save_ocr_edit", {"id": item_id, "text": "OCR TEXT"})
+
+            result = worker.handle_request(
+                "generate_title_from_ocr",
+                {
+                    "id": item_id,
+                    "secrets": {
+                        "baiduApiKey": "baidu-key",
+                        "baiduSecretKey": "baidu-secret",
+                        "deepseekApiKey": "deepseek-key",
+                    },
+                },
+            )
+
+            self.assertEqual(result["item"]["suggestedTitle"], "Action Title")
+            self.assertEqual(result["item"]["deepseekRawText"], "Action Title\nreasoning and alternate wording")
+
+            title_event = next(event for event in events if event["event"] == "item_title")
+            self.assertEqual(title_event["deepseekRawText"], "Action Title\nreasoning and alternate wording")
+
+            log_event = next(
+                event
+                for event in events
+                if event["event"] == "log" and "reasoning and alternate wording" in str(event["message"])
+            )
+            self.assertIn("clip.mp4", str(log_event["message"]))
 
     def test_stop_processing_stops_after_current_item(self) -> None:
         with TemporaryDirectory() as tmp:

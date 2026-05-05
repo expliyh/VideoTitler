@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   ocrMode: 'accurate_basic',
   deepseekBaseUrl: 'https://api.deepseek.com/v1',
   deepseekModel: 'deepseek-v4-pro',
+  deepseekThinkingEnabled: true,
   deepseekSystemPrompt: 'Extract one short video title from the OCR text. Return the title only.',
   deepseekUserPromptTemplate: 'OCR text:\n{ocr_text}\n\nReturn one short title only.',
   uiLanguage: 'system',
@@ -66,6 +67,7 @@ function buildSettingsInput(settings: AppSettings, secretDraft: SecretDraftState
     ocrMode: settings.ocrMode,
     deepseekBaseUrl: settings.deepseekBaseUrl,
     deepseekModel: settings.deepseekModel,
+    deepseekThinkingEnabled: settings.deepseekThinkingEnabled,
     deepseekSystemPrompt: settings.deepseekSystemPrompt,
     deepseekUserPromptTemplate: settings.deepseekUserPromptTemplate,
     uiLanguage: settings.uiLanguage,
@@ -878,6 +880,19 @@ export function App() {
               />
             </div>
 
+            <div className="editor-block">
+              <div className="editor-header">
+                <h3>{i18n.deepseekRawText}</h3>
+              </div>
+              <textarea
+                className="raw-response-text"
+                rows={6}
+                value={selectedItem?.deepseekRawText ?? ''}
+                placeholder={i18n.deepseekRawPlaceholder}
+                readOnly
+              />
+            </div>
+
             <div className="detail-actions">
               <button type="button" className="button secondary" onClick={handleGenerateTitle} disabled={!selectedItem}>
                 {i18n.generateTitleFromOcr}
@@ -1012,6 +1027,15 @@ export function App() {
                 value={settings.deepseekModel}
                 onChange={(event) => setSettings((previous) => ({ ...previous, deepseekModel: event.target.value }))}
               />
+            </label>
+
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={settings.deepseekThinkingEnabled}
+                onChange={(event) => setSettings((previous) => ({ ...previous, deepseekThinkingEnabled: event.target.checked }))}
+              />
+              <span>{i18n.deepseekThinkingMode}</span>
             </label>
 
             <label className="field">

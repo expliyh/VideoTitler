@@ -27,7 +27,7 @@ except Exception:  # pragma: no cover
 
 from videotitler.baidu_ocr import BaiduOcrClient, BaiduOcrError
 from videotitler.config import AppConfig, default_config_path, load_config, save_config
-from videotitler.deepseek import DeepSeekError, extract_title_sentence
+from videotitler.deepseek import DeepSeekError, extract_title_result
 from videotitler.rename import build_target_path, pick_non_conflicting_path
 from videotitler.video import VideoFrameError, extract_frame_as_png_bytes
 
@@ -40,6 +40,7 @@ class VideoRow:
     path: Path
     status: str = "待处理"
     ocr_text: str = ""
+    deepseek_raw_text: str = ""
     preview_image: object | None = None
     title: str = ""
     new_name: str = ""
@@ -263,6 +264,11 @@ class VideoTitlerApp:
         self._error_label = ttk.Label(tab_ocr, textvariable=self._error_var, bootstyle="danger")
         self._error_label.pack(fill=X, pady=(0, 8))
 
+        ttk.Label(tab_ocr, text="DeepSeek 完整返回").pack(anchor="w")
+        self._deepseek_raw_text = ScrolledText(tab_ocr, height=5, wrap="word")
+        self._deepseek_raw_text.pack(fill=X, pady=(0, 10))
+
+        ttk.Label(tab_ocr, text="OCR 文本").pack(anchor="w")
         self._ocr_text = ScrolledText(tab_ocr, height=12, wrap="word")
         self._ocr_text.pack(fill=BOTH, expand=True)
 
@@ -275,6 +281,7 @@ class VideoTitlerApp:
         self._deepseek_api_key_var = ttk.StringVar(value="")
         self._deepseek_base_url_var = ttk.StringVar(value="https://api.deepseek.com/v1")
         self._deepseek_model_var = ttk.StringVar(value="deepseek-v4-pro")
+        self._deepseek_thinking_enabled_var = ttk.BooleanVar(value=True)
         self._save_keys_var = ttk.BooleanVar(value=False)
 
         grid = ttk.Frame(tab_keys)
@@ -290,33 +297,38 @@ class VideoTitlerApp:
         add_row(2, "DeepSeek API Key", self._deepseek_api_key_var, show="*")
         add_row(3, "DeepSeek Base URL", self._deepseek_base_url_var)
         add_row(4, "DeepSeek Model", self._deepseek_model_var)
+        ttk.Checkbutton(
+            grid,
+            text="DeepSeek Thinking Mode",
+            variable=self._deepseek_thinking_enabled_var,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 6))
 
         grid.columnconfigure(1, weight=1)
 
         ttk.Checkbutton(grid, text="保存密钥到本地 config.json", variable=self._save_keys_var).grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(8, 10)
+            row=6, column=0, columnspan=2, sticky="w", pady=(8, 10)
         )
         ttk.Button(grid, text="保存设置", command=self._save_settings, bootstyle="secondary").grid(
-            row=6, column=0, sticky="w"
+            row=7, column=0, sticky="w"
         )
 
-        ttk.Separator(grid).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(14, 10))
-        ttk.Label(grid, text="DeepSeek System Prompt").grid(row=8, column=0, sticky="nw", pady=6)
+        ttk.Separator(grid).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 10))
+        ttk.Label(grid, text="DeepSeek System Prompt").grid(row=9, column=0, sticky="nw", pady=6)
         self._ds_system_prompt_text = ScrolledText(grid, height=6, wrap="word")
-        self._ds_system_prompt_text.grid(row=8, column=1, sticky="nsew", pady=6, padx=(10, 0))
+        self._ds_system_prompt_text.grid(row=9, column=1, sticky="nsew", pady=6, padx=(10, 0))
 
         ttk.Label(grid, text="DeepSeek User Prompt 模板（支持 {ocr_text}）").grid(
-            row=9, column=0, sticky="nw", pady=6
+            row=10, column=0, sticky="nw", pady=6
         )
         self._ds_user_prompt_text = ScrolledText(grid, height=8, wrap="word")
-        self._ds_user_prompt_text.grid(row=9, column=1, sticky="nsew", pady=6, padx=(10, 0))
+        self._ds_user_prompt_text.grid(row=10, column=1, sticky="nsew", pady=6, padx=(10, 0))
 
         ttk.Button(grid, text="重置为默认 Prompt", command=self._reset_prompts, bootstyle="secondary").grid(
-            row=10, column=0, sticky="w", pady=(6, 0)
+            row=11, column=0, sticky="w", pady=(6, 0)
         )
 
-        grid.rowconfigure(8, weight=1)
-        grid.rowconfigure(9, weight=2)
+        grid.rowconfigure(9, weight=1)
+        grid.rowconfigure(10, weight=2)
 
     def _append_log(self, message: str) -> None:
         self._log_text.insert(END, message.rstrip() + "\n")
@@ -329,6 +341,17 @@ class VideoTitlerApp:
         self._ocr_text.delete("1.0", END)
         self._ocr_text.insert(END, text or "")
         self._ocr_text.see("1.0")
+
+    def _set_deepseek_raw_text(self, text: str) -> None:
+        self._deepseek_raw_text.delete("1.0", END)
+        self._deepseek_raw_text.insert(END, text or "")
+        self._deepseek_raw_text.see("1.0")
+
+    def _extract_title_and_raw_text(self, **kwargs: object) -> tuple[str, str]:
+        result = extract_title_result(**kwargs)
+        if hasattr(result, "title") and hasattr(result, "raw_text"):
+            return str(result.title), str(result.raw_text)
+        return str(result).strip(), ""
 
     def _get_selected_row(self) -> VideoRow | None:
         selection = self._tree.selection()
@@ -443,17 +466,19 @@ class VideoTitlerApp:
         user_prompt_template = cfg.deepseek_user_prompt_template
         base_url = cfg.deepseek_base_url
         model = cfg.deepseek_model
+        thinking_enabled = cfg.deepseek_thinking_enabled
         api_key = cfg.deepseek_api_key
 
         def worker() -> None:
             try:
-                title = extract_title_sentence(
+                title, raw_text = self._extract_title_and_raw_text(
                     api_key=api_key,
                     base_url=base_url,
                     model=model,
                     ocr_text=ocr_text,
                     system_prompt=system_prompt,
                     user_prompt_template=user_prompt_template,
+                    thinking_enabled=thinking_enabled,
                 )
                 target = build_target_path(
                     src_path,
@@ -462,7 +487,9 @@ class VideoTitlerApp:
                     title=title,
                 )
                 target = pick_non_conflicting_path(target, ignore_path=src_path)
-                self._queue.put(("title", (src_path, title, target.name)))
+                self._queue.put(("title", (src_path, title, raw_text, target.name)))
+                if raw_text.strip():
+                    self._queue.put(("log", f"[DeepSeek] {src_path.name}\n{raw_text}"))
                 self._queue.put(("status", (src_path, "待重命名")))
             except (DeepSeekError, OSError) as exc:
                 self._queue.put(("error", (src_path, str(exc))))
@@ -537,6 +564,7 @@ class VideoTitlerApp:
 
         self._deepseek_base_url_var.set(cfg.deepseek_base_url or "https://api.deepseek.com/v1")
         self._deepseek_model_var.set(cfg.deepseek_model or "deepseek-v4-pro")
+        self._deepseek_thinking_enabled_var.set(bool(cfg.deepseek_thinking_enabled))
         self._save_keys_var.set(bool(cfg.save_keys_locally))
         self._ds_system_prompt_text.delete("1.0", END)
         self._ds_system_prompt_text.insert(END, cfg.deepseek_system_prompt or "")
@@ -562,6 +590,7 @@ class VideoTitlerApp:
         cfg.deepseek_api_key = self._deepseek_api_key_var.get().strip()
         cfg.deepseek_base_url = self._deepseek_base_url_var.get().strip() or "https://api.deepseek.com/v1"
         cfg.deepseek_model = self._deepseek_model_var.get().strip() or "deepseek-v4-pro"
+        cfg.deepseek_thinking_enabled = bool(self._deepseek_thinking_enabled_var.get())
         cfg.save_keys_locally = bool(self._save_keys_var.get())
         cfg.deepseek_system_prompt = self._ds_system_prompt_text.get("1.0", END).strip()
         cfg.deepseek_user_prompt_template = self._ds_user_prompt_text.get("1.0", END).strip()
@@ -727,13 +756,14 @@ class VideoTitlerApp:
 
                 stage = "DeepSeek"
                 self._queue.put(("status", (row.path, "DeepSeek…")))
-                title = extract_title_sentence(
+                title, raw_text = self._extract_title_and_raw_text(
                     api_key=cfg.deepseek_api_key,
                     base_url=cfg.deepseek_base_url,
                     model=cfg.deepseek_model,
                     ocr_text=ocr_text,
                     system_prompt=cfg.deepseek_system_prompt,
                     user_prompt_template=cfg.deepseek_user_prompt_template,
+                    thinking_enabled=cfg.deepseek_thinking_enabled,
                 )
 
                 target = build_target_path(
@@ -745,7 +775,9 @@ class VideoTitlerApp:
                 target = pick_non_conflicting_path(target, ignore_path=row.path)
 
                 new_name = target.name
-                self._queue.put(("title", (row.path, title, new_name)))
+                self._queue.put(("title", (row.path, title, raw_text, new_name)))
+                if raw_text.strip():
+                    self._queue.put(("log", f"[DeepSeek] {row.path.name}\n{raw_text}"))
 
                 if not cfg.dry_run:
                     stage = "重命名"
@@ -800,9 +832,18 @@ class VideoTitlerApp:
             self._update_row(path, ocr_text=str(ocr_text))
             return
 
+        if kind == "log":
+            if isinstance(payload, str) and payload.strip():
+                self._append_log(payload.strip())
+            return
+
         if kind == "title":
-            path, title, new_name = payload  # type: ignore[misc]
-            self._update_row(path, title=str(title), new_name=str(new_name))
+            if isinstance(payload, tuple) and len(payload) == 4:
+                path, title, raw_text, new_name = payload  # type: ignore[misc]
+                self._update_row(path, title=str(title), deepseek_raw_text=str(raw_text), new_name=str(new_name))
+            else:
+                path, title, new_name = payload  # type: ignore[misc]
+                self._update_row(path, title=str(title), new_name=str(new_name))
             return
 
         if kind == "renamed":
@@ -852,6 +893,7 @@ class VideoTitlerApp:
         *,
         status: str | None = None,
         ocr_text: str | None = None,
+        deepseek_raw_text: str | None = None,
         preview_image: object | None = None,
         title: str | None = None,
         new_name: str | None = None,
@@ -863,6 +905,8 @@ class VideoTitlerApp:
                     row.status = status
                 if ocr_text is not None:
                     row.ocr_text = ocr_text
+                if deepseek_raw_text is not None:
+                    row.deepseek_raw_text = deepseek_raw_text
                 if preview_image is not None:
                     row.preview_image = preview_image
                 if title is not None:
@@ -904,6 +948,7 @@ class VideoTitlerApp:
 
     def _sync_selected_details(self, row: VideoRow) -> None:
         self._set_ocr_text(row.ocr_text)
+        self._set_deepseek_raw_text(row.deepseek_raw_text)
         self._title_var.set(row.title or "")
         self._set_error(row.error)
         if row.preview_image is not None:

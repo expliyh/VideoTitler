@@ -26,3 +26,10 @@ test('video-summary-scroll does not cap the desktop list viewport below the card
   assert.match(scrollRule, /height:\s*100%;/);
   assert.doesNotMatch(scrollRule, /max-height:\s*clamp\(/);
 });
+
+test('log output wraps full log lines instead of clipping them horizontally', () => {
+  const logRule = getRuleBody('.log-output');
+
+  assert.match(logRule, /white-space:\s*pre-wrap;/);
+  assert.match(logRule, /overflow-wrap:\s*anywhere;/);
+});

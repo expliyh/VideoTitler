@@ -45,6 +45,7 @@ function toWorkerSettingsPayload(settings: AppSettingsInput): WorkerSettingsPayl
     ocrMode: settings.ocrMode,
     deepseekBaseUrl: settings.deepseekBaseUrl,
     deepseekModel: settings.deepseekModel,
+    deepseekThinkingEnabled: settings.deepseekThinkingEnabled,
     deepseekSystemPrompt: settings.deepseekSystemPrompt,
     deepseekUserPromptTemplate: settings.deepseekUserPromptTemplate,
     uiLanguage: settings.uiLanguage,
@@ -222,6 +223,13 @@ export class DesktopBackend {
       this.options.onWorkerEvent({
         event: 'log',
         message: `[worker:stderr] ${String(line)}`
+      });
+    });
+
+    worker.on('stdout', (line) => {
+      this.options.onWorkerEvent({
+        event: 'log',
+        message: `[worker:stdout] ${String(line)}`
       });
     });
 

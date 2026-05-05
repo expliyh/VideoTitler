@@ -54,6 +54,8 @@ export type UiText = {
   suggestedTitle: string;
   saveTitle: string;
   titlePlaceholder: string;
+  deepseekRawText: string;
+  deepseekRawPlaceholder: string;
   generateTitleFromOcr: string;
   renameSelected: string;
   logs: string;
@@ -78,6 +80,7 @@ export type UiText = {
   deepseekRequestSettings: string;
   baseUrl: string;
   model: string;
+  deepseekThinkingMode: string;
   systemPrompt: string;
   userPromptTemplate: string;
   recentDirectories: string;

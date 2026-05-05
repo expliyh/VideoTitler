@@ -79,6 +79,7 @@ export function applyWorkerEvent(state: UiState, event: WorkerEvent): UiState {
       items: updateItem(state.items, event.id, (item) => ({
         ...item,
         suggestedTitle: event.suggestedTitle,
+        deepseekRawText: event.deepseekRawText,
         newName: event.newName
       }))
     };

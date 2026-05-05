@@ -43,6 +43,7 @@ export type AppSettings = {
   ocrMode: OcrMode;
   deepseekBaseUrl: string;
   deepseekModel: string;
+  deepseekThinkingEnabled: boolean;
   deepseekSystemPrompt: string;
   deepseekUserPromptTemplate: string;
   uiLanguage: LanguageSetting;
@@ -66,6 +67,7 @@ export type ProcessingItem = {
   status: string;
   ocrText: string;
   suggestedTitle: string;
+  deepseekRawText: string;
   newName: string;
   error: string;
   previewDataUrl: string;
@@ -111,6 +113,7 @@ export type WorkerItemTitleEvent = {
   event: 'item_title';
   id: string;
   suggestedTitle: string;
+  deepseekRawText: string;
   newName: string;
 };
 

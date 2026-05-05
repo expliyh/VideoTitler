@@ -26,6 +26,11 @@ function createFixtureScript(): string {
       "    console.log(JSON.stringify({ type: 'response', requestId: request.requestId, ok: false, error: 'boom' }));",
       "    return;",
       "  }",
+      "  if (request.method === 'stdout-log') {",
+      "    console.log('python layer raw stdout');",
+      "    console.log(JSON.stringify({ type: 'response', requestId: request.requestId, ok: true, payload: { ok: true } }));",
+      "    return;",
+      "  }",
       "  if (request.method === 'shutdown') {",
       "    console.log(JSON.stringify({ type: 'response', requestId: request.requestId, ok: true, payload: { shutdown: true } }));",
       "    process.exit(0);",
@@ -72,6 +77,27 @@ test('PythonWorkerClient rejects failed worker responses', async () => {
   await client.start();
 
   await assert.rejects(() => client.request('fail', {}), /boom/);
+
+  await client.shutdown();
+});
+
+test('PythonWorkerClient exposes non-protocol stdout as loggable output', async () => {
+  const fixturePath = createFixtureScript();
+  const client = new PythonWorkerClient({
+    command: process.execPath,
+    args: [fixturePath],
+    cwd: process.cwd()
+  });
+  const stdoutLines: string[] = [];
+
+  client.on('stdout', (line) => {
+    stdoutLines.push(String(line));
+  });
+
+  await client.start();
+  await client.request('stdout-log', {});
+
+  assert.deepEqual(stdoutLines, ['python layer raw stdout']);
 
   await client.shutdown();
 });

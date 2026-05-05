@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 
 import requests
 
 
 class DeepSeekError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class DeepSeekTitleResult:
+    title: str
+    raw_text: str
 
 
 def _first_non_empty_line(text: str) -> str:
@@ -18,7 +25,18 @@ def _first_non_empty_line(text: str) -> str:
     return ""
 
 
-def extract_title_sentence(
+def _deepseek_message_parts(message: dict[str, object]) -> tuple[str, str, str]:
+    content = str(message.get("content") or "").strip()
+    reasoning_content = str(message.get("reasoning_content") or "").strip()
+
+    if content and reasoning_content:
+        return content, reasoning_content, f"[content]\n{content}\n\n[reasoning_content]\n{reasoning_content}"
+    if content:
+        return content, reasoning_content, content
+    return content, reasoning_content, reasoning_content
+
+
+def extract_title_result(
     *,
     api_key: str,
     base_url: str,
@@ -28,7 +46,8 @@ def extract_title_sentence(
     user_prompt_template: str,
     timeout_s: int = 60,
     retries: int = 2,
-) -> str:
+    thinking_enabled: bool = True,
+) -> DeepSeekTitleResult:
     api_key = api_key.strip()
     if not api_key:
         raise DeepSeekError("缺少 DeepSeek API Key。")
@@ -59,21 +78,25 @@ def extract_title_sentence(
     last_exc: Exception | None = None
     for attempt in range(retries):
         try:
+            request_body: dict[str, object] = {
+                "model": (model or "deepseek-v4-pro"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "thinking": {"type": "enabled" if thinking_enabled else "disabled"},
+                "max_tokens": 8192 if thinking_enabled else 80,
+            }
+            if not thinking_enabled:
+                request_body["temperature"] = 0.2
+
             response = requests.post(
                 url,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": (model or "deepseek-v4-pro"),
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 80,
-                },
+                json=request_body,
                 timeout=timeout_s,
             )
             response.raise_for_status()
@@ -90,13 +113,23 @@ def extract_title_sentence(
         raise DeepSeekError(f"DeepSeek 请求失败：{last_exc}")
 
     try:
-        content = payload["choices"][0]["message"]["content"]
+        message = payload["choices"][0]["message"]
     except Exception as exc:
         raise DeepSeekError(f"DeepSeek 返回格式异常：{payload!r}") from exc
 
+    if not isinstance(message, dict):
+        raise DeepSeekError(f"DeepSeek message format is invalid: {payload!r}")
+
+    content, _reasoning_content, raw_text = _deepseek_message_parts(message)
+    if not content.strip():
+        raise DeepSeekError(f"DeepSeek returned empty final content. Full response: {raw_text or payload!r}")
     title = _first_non_empty_line(content)
 
     # Light cleanup in case the model returns quotes/prefixes.
     title = re.sub(r'^[\"“”\'\s]+|[\"“”\'\s]+$', "", title).strip()
     title = re.sub(r"^(标题|title)[:：\s]+", "", title, flags=re.IGNORECASE).strip()
-    return title
+    return DeepSeekTitleResult(title=title, raw_text=raw_text)
+
+
+def extract_title_sentence(**kwargs: object) -> str:
+    return extract_title_result(**kwargs).title

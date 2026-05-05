@@ -17,6 +17,7 @@ function makeItem(overrides: Partial<ProcessingItem> = {}): ProcessingItem {
     status: 'idle',
     ocrText: '',
     suggestedTitle: '',
+    deepseekRawText: '',
     newName: '',
     error: '',
     previewDataUrl: '',
@@ -42,6 +43,7 @@ test('applyWorkerEvent merges per-item updates into the current item list', () =
     event: 'item_title',
     id: 'item-1',
     suggestedTitle: 'New Title',
+    deepseekRawText: 'New Title\nfull DeepSeek response',
     newName: '001-New Title.mp4'
   });
 
@@ -50,6 +52,7 @@ test('applyWorkerEvent merges per-item updates into the current item list', () =
     previewDataUrl: 'data:image/png;base64,abc',
     ocrText: 'OCR TEXT',
     suggestedTitle: 'New Title',
+    deepseekRawText: 'New Title\nfull DeepSeek response',
     newName: '001-New Title.mp4'
   });
 });

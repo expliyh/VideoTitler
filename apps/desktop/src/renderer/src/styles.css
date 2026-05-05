@@ -72,6 +72,10 @@ textarea {
   min-height: 7rem;
 }
 
+.raw-response-text {
+  white-space: pre-wrap;
+}
+
 .page-shell {
   min-height: 100vh;
   padding: 1.2rem;
@@ -528,6 +532,9 @@ textarea {
   min-height: 14rem;
   max-height: 22rem;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   padding: 1rem 1.1rem;
   border-radius: 20px;
   background: #1f2730;

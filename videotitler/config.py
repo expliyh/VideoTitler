@@ -23,6 +23,7 @@ class AppConfig:
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-v4-pro"
+    deepseek_thinking_enabled: bool = True
     deepseek_system_prompt: str = (
         "你是标题提炼助手。你会从杂乱的 OCR 文本中提取一个适合作为短视频标题的中文短句。"
         "标题是文本中的原文，具有以下特征\n"
@@ -53,6 +54,7 @@ _NON_SECRET_FIELDS = {
     "baidu_ocr_mode",
     "deepseek_base_url",
     "deepseek_model",
+    "deepseek_thinking_enabled",
     "deepseek_system_prompt",
     "deepseek_user_prompt_template",
     "ui_language",

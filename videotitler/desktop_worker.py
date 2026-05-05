@@ -12,7 +12,7 @@ from typing import Callable
 
 from videotitler.baidu_ocr import BaiduOcrClient
 from videotitler.config import AppConfig, load_non_secret_config, save_non_secret_config
-from videotitler.deepseek import extract_title_sentence
+from videotitler.deepseek import DeepSeekTitleResult, extract_title_result
 from videotitler.rename import build_target_path, pick_non_conflicting_path
 from videotitler.video import extract_frame_as_png_bytes
 
@@ -65,6 +65,7 @@ class WorkerVideoItem:
     status: str = "待处理"
     ocr_text: str = ""
     suggested_title: str = ""
+    deepseek_raw_text: str = ""
     new_name: str = ""
     error: str = ""
     preview_data_url: str = ""
@@ -82,13 +83,13 @@ class DesktopWorker:
         emit: Callable[[dict[str, object]], None],
         frame_extractor: Callable[[Path, int], bytes] | None = None,
         ocr_recognizer: Callable[..., str] | None = None,
-        title_extractor: Callable[..., str] | None = None,
+        title_extractor: Callable[..., object] | None = None,
     ) -> None:
         self._config_path = config_path
         self._emit = emit
         self._frame_extractor = frame_extractor or _default_frame_extractor
         self._ocr_recognizer = ocr_recognizer or _default_ocr_recognizer
-        self._title_extractor = title_extractor or extract_title_sentence
+        self._title_extractor = title_extractor or extract_title_result
 
         self._config = load_non_secret_config(self._config_path)
         self._items: list[WorkerVideoItem] = []
@@ -191,16 +192,18 @@ class DesktopWorker:
         item.error = ""
         self._emit_item_status(item)
 
-        title = self._title_extractor(
+        title, raw_text = self._extract_title_and_raw_text(
             api_key=secrets["deepseekApiKey"],
             base_url=self._config.deepseek_base_url,
             model=self._config.deepseek_model,
             ocr_text=item.ocr_text,
             system_prompt=self._config.deepseek_system_prompt,
             user_prompt_template=self._config.deepseek_user_prompt_template,
+            thinking_enabled=self._config.deepseek_thinking_enabled,
         )
 
         item.suggested_title = title
+        item.deepseek_raw_text = raw_text
         item.new_name = self._compute_target_path(item).name
         item.status = "待重命名"
         item.error = ""
@@ -351,13 +354,14 @@ class DesktopWorker:
 
                 item.status = "DeepSeek…"
                 self._emit_item_status(item)
-                item.suggested_title = self._title_extractor(
+                item.suggested_title, item.deepseek_raw_text = self._extract_title_and_raw_text(
                     api_key=secrets["deepseekApiKey"],
                     base_url=self._config.deepseek_base_url,
                     model=self._config.deepseek_model,
                     ocr_text=item.ocr_text,
                     system_prompt=self._config.deepseek_system_prompt,
                     user_prompt_template=self._config.deepseek_user_prompt_template,
+                    thinking_enabled=self._config.deepseek_thinking_enabled,
                 )
                 target = self._compute_target_path(item)
                 item.new_name = target.name
@@ -441,6 +445,16 @@ class DesktopWorker:
         )
         return pick_non_conflicting_path(target, ignore_path=item.path)
 
+    def _extract_title_and_raw_text(self, **kwargs: object) -> tuple[str, str]:
+        result = self._title_extractor(**kwargs)
+        if isinstance(result, DeepSeekTitleResult):
+            return result.title, result.raw_text
+        if isinstance(result, dict):
+            title = str(result.get("title", "")).strip()
+            raw_text = str(result.get("raw_text", result.get("rawText", "")))
+            return title, raw_text
+        return str(result).strip(), ""
+
     def _remember_recent_dir(self, directory: str) -> None:
         directory = (directory or "").strip()
         if not directory:
@@ -477,6 +491,7 @@ class DesktopWorker:
             "ocrMode": config.baidu_ocr_mode,
             "deepseekBaseUrl": config.deepseek_base_url,
             "deepseekModel": config.deepseek_model,
+            "deepseekThinkingEnabled": config.deepseek_thinking_enabled,
             "deepseekSystemPrompt": config.deepseek_system_prompt,
             "deepseekUserPromptTemplate": config.deepseek_user_prompt_template,
             "uiLanguage": config.ui_language,
@@ -491,6 +506,7 @@ class DesktopWorker:
             "status": item.status,
             "ocrText": item.ocr_text,
             "suggestedTitle": item.suggested_title,
+            "deepseekRawText": item.deepseek_raw_text,
             "newName": item.new_name,
             "error": item.error,
             "previewDataUrl": item.preview_data_url,
@@ -517,9 +533,13 @@ class DesktopWorker:
                 "event": "item_title",
                 "id": item.id,
                 "suggestedTitle": item.suggested_title,
+                "deepseekRawText": item.deepseek_raw_text,
                 "newName": item.new_name,
             }
         )
+        raw_text = item.deepseek_raw_text.strip()
+        if raw_text:
+            self._emit_log(f"[DeepSeek] {item.file_name}\n{raw_text}")
 
     def _emit_item_status(self, item: WorkerVideoItem) -> None:
         self._emit(
@@ -569,6 +589,12 @@ class DesktopWorker:
         config.baidu_ocr_mode = self._get_str(values, "baidu_ocr_mode", "ocrMode") or config.baidu_ocr_mode
         config.deepseek_base_url = self._get_str(values, "deepseek_base_url", "deepseekBaseUrl") or config.deepseek_base_url
         config.deepseek_model = self._get_str(values, "deepseek_model", "deepseekModel") or config.deepseek_model
+        config.deepseek_thinking_enabled = self._get_bool(
+            values,
+            "deepseek_thinking_enabled",
+            "deepseekThinkingEnabled",
+            default=config.deepseek_thinking_enabled,
+        )
         config.deepseek_system_prompt = self._get_str(values, "deepseek_system_prompt", "deepseekSystemPrompt") or config.deepseek_system_prompt
         config.deepseek_user_prompt_template = (
             self._get_str(values, "deepseek_user_prompt_template", "deepseekUserPromptTemplate")

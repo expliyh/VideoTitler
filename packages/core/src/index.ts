@@ -1,4 +1,4 @@
-import { access } from 'node:fs/promises';
+import { access, readdir } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 
 export type VideoRecord = {
@@ -77,6 +77,20 @@ export type RenameSourceDirectoryResult = {
   inputDir: string;
   recentDirs: string[];
   items: ProcessingItem[];
+};
+
+export type VideoIndexSuggestion = {
+  suggestedIndex: number;
+  candidateIndexes: number[];
+  suggestedIndexPadding: number;
+  isAutoIncrement: boolean;
+};
+
+export type SingleVideoLoadResult = {
+  inputDir: string;
+  recentDirs: string[];
+  items: ProcessingItem[];
+  indexSuggestion: VideoIndexSuggestion;
 };
 
 export type ProcessingSessionState = {
@@ -174,6 +188,79 @@ export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.mkv', '.avi', '.webm'
 
 export function isVideoFile(fileName: string): boolean {
   return VIDEO_EXTENSIONS.has(extname(fileName).toLowerCase());
+}
+
+function parseLeadingIndex(fileName: string): { index: number; width: number } | null {
+  const stem = basename(fileName, extname(fileName));
+  const match = /^(\d+)(?:[-_\s.]|$)/.exec(stem);
+  if (!match) {
+    return null;
+  }
+
+  const rawIndex = match[1];
+  const value = Number.parseInt(rawIndex, 10);
+  return Number.isInteger(value) && value > 0
+    ? { index: value, width: rawIndex.length }
+    : null;
+}
+
+export function suggestIndexFromFileNames(fileNames: string[], defaultIndexPadding = 3): VideoIndexSuggestion {
+  const parsedIndexes = fileNames
+    .filter(isVideoFile)
+    .map(parseLeadingIndex)
+    .filter((parsed): parsed is { index: number; width: number } => parsed !== null);
+  const indexes = Array.from(new Set(parsedIndexes.map((parsed) => parsed.index))).sort((left, right) => left - right);
+  const suggestedIndexPadding = Math.max(
+    1,
+    parsedIndexes.length > 0
+      ? Math.max(...parsedIndexes.map((parsed) => parsed.width))
+      : Math.max(1, defaultIndexPadding)
+  );
+
+  if (indexes.length === 0) {
+    return {
+      suggestedIndex: 1,
+      candidateIndexes: [],
+      suggestedIndexPadding,
+      isAutoIncrement: true
+    };
+  }
+
+  const used = new Set(indexes);
+  const maxIndex = indexes[indexes.length - 1] ?? 0;
+  const candidateIndexes: number[] = [];
+  for (let index = 1; index < maxIndex; index += 1) {
+    if (!used.has(index)) {
+      candidateIndexes.push(index);
+    }
+  }
+
+  if (candidateIndexes.length > 0) {
+    return {
+      suggestedIndex: candidateIndexes[0],
+      candidateIndexes,
+      suggestedIndexPadding,
+      isAutoIncrement: false
+    };
+  }
+
+  return {
+    suggestedIndex: maxIndex + 1,
+    candidateIndexes: [],
+    suggestedIndexPadding,
+    isAutoIncrement: true
+  };
+}
+
+export async function suggestVideoIndexForPath(videoPath: string, defaultIndexPadding = 3): Promise<VideoIndexSuggestion> {
+  const parent = dirname(videoPath);
+  const selectedName = basename(videoPath);
+  const entries = await readdir(parent, { withFileTypes: true });
+  const siblingNames = entries
+    .filter((entry) => entry.isFile() && entry.name !== selectedName)
+    .map((entry) => entry.name);
+
+  return suggestIndexFromFileNames(siblingNames, defaultIndexPadding);
 }
 
 export function buildRenameTarget(context: RenameRuleContext): string {

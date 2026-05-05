@@ -8,9 +8,54 @@ from tempfile import TemporaryDirectory
 
 from videotitler.config import AppConfig, load_non_secret_config, save_non_secret_config
 from videotitler.desktop_worker import DesktopWorker
+from videotitler.rename import suggest_video_index_for_path
 
 
 class DesktopWorkerTests(unittest.TestCase):
+    def test_suggest_video_index_for_path_finds_missing_indexes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "001-Opening.mp4").write_bytes(b"one")
+            (root / "003-Move.mkv").write_bytes(b"three")
+            (root / "005-End.webm").write_bytes(b"five")
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            suggestion = suggest_video_index_for_path(target)
+
+            self.assertEqual(suggestion.suggested_index, 2)
+            self.assertEqual(suggestion.candidate_indexes, [2, 4])
+            self.assertEqual(suggestion.suggested_index_padding, 3)
+            self.assertFalse(suggestion.is_auto_increment)
+
+    def test_suggest_video_index_for_path_follows_existing_padding(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "0001-Opening.mp4").write_bytes(b"one")
+            (root / "0003-Move.mkv").write_bytes(b"three")
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            suggestion = suggest_video_index_for_path(target)
+
+            self.assertEqual(suggestion.suggested_index, 2)
+            self.assertEqual(suggestion.suggested_index_padding, 4)
+
+    def test_suggest_video_index_for_path_auto_increments_when_no_gap_exists(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "001-Opening.mp4").write_bytes(b"one")
+            (root / "002-Move.mkv").write_bytes(b"two")
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            suggestion = suggest_video_index_for_path(target)
+
+            self.assertEqual(suggestion.suggested_index, 3)
+            self.assertEqual(suggestion.candidate_indexes, [])
+            self.assertEqual(suggestion.suggested_index_padding, 3)
+            self.assertTrue(suggestion.is_auto_increment)
+
     def test_save_non_secret_config_omits_secrets(self) -> None:
         with TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "settings.json"
@@ -373,6 +418,103 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertEqual(rename_result["item"]["fileName"], "002-Custom Title_2.mp4")
             self.assertTrue((root / "002-Custom Title_2.mp4").exists())
             self.assertFalse(target.exists())
+
+    def test_rename_one_accepts_manual_index_override(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "001-Existing.mp4").write_bytes(b"existing")
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            worker = self._create_worker(root / "settings.json")
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "include_subdirs": False,
+                        "frame_number_1based": 1,
+                        "start_index": 1,
+                        "index_padding": 3,
+                        "dry_run": False,
+                    }
+                },
+            )
+            scan_result = worker.handle_request("scan_videos", {"directory": str(root), "include_subdirs": False})
+            item_id = next(item["id"] for item in scan_result["items"] if item["fileName"] == "raw.mp4")
+
+            rename_result = worker.handle_request("rename_one", {"id": item_id, "title": "Custom Title", "index": 7})
+
+            self.assertEqual(rename_result["item"]["fileName"], "007-Custom Title.mp4")
+            self.assertTrue((root / "007-Custom Title.mp4").exists())
+            self.assertFalse(target.exists())
+
+    def test_rename_one_follows_existing_folder_padding_for_single_video(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "0001-Existing.mp4").write_bytes(b"existing")
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            worker = self._create_worker(root / "settings.json")
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "index_padding": 2,
+                        "dry_run": False,
+                    }
+                },
+            )
+            result = worker.handle_request("load_single_video", {"filePath": str(target)})
+            item_id = result["items"][0]["id"]
+
+            rename_result = worker.handle_request("rename_one", {"id": item_id, "title": "Custom Title"})
+
+            self.assertEqual(rename_result["item"]["fileName"], "0002-Custom Title.mp4")
+            self.assertTrue((root / "0002-Custom Title.mp4").exists())
+
+    def test_rename_one_uses_config_padding_when_single_video_folder_has_no_indexed_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            worker = self._create_worker(root / "settings.json")
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "input_dir": str(root),
+                        "index_padding": 5,
+                        "dry_run": False,
+                    }
+                },
+            )
+            result = worker.handle_request("load_single_video", {"filePath": str(target)})
+            item_id = result["items"][0]["id"]
+
+            rename_result = worker.handle_request("rename_one", {"id": item_id, "title": "Custom Title"})
+
+            self.assertEqual(rename_result["item"]["fileName"], "00001-Custom Title.mp4")
+            self.assertTrue((root / "00001-Custom Title.mp4").exists())
+
+    def test_load_single_video_returns_one_item_and_index_suggestion(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "001-Opening.mp4").write_bytes(b"one")
+            (root / "003-Move.mp4").write_bytes(b"three")
+            target = root / "raw.mp4"
+            target.write_bytes(b"raw")
+
+            worker = self._create_worker(root / "settings.json")
+            result = worker.handle_request("load_single_video", {"filePath": str(target)})
+
+            self.assertEqual([item["fileName"] for item in result["items"]], ["raw.mp4"])
+            self.assertEqual(result["indexSuggestion"]["suggestedIndex"], 2)
+            self.assertEqual(result["indexSuggestion"]["candidateIndexes"], [2])
+            self.assertEqual(result["indexSuggestion"]["suggestedIndexPadding"], 3)
 
     def test_rename_source_directory_updates_config_and_items(self) -> None:
         with TemporaryDirectory() as tmp:

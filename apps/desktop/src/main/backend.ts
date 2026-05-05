@@ -226,6 +226,13 @@ export class DesktopBackend {
       });
     });
 
+    worker.on('stdout', (line) => {
+      this.options.onWorkerEvent({
+        event: 'log',
+        message: `[worker:stdout] ${String(line)}`
+      });
+    });
+
     worker.on('exit', ({ code }) => {
       this.worker = null;
       this.options.onLifecycle({

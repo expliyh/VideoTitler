@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, WorkerLifecycleEvent } from '@videotitler/core';
+import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, VideoIndexSuggestion, WorkerLifecycleEvent } from '@videotitler/core';
 
 import { applyRenamedSourceDirectoryItems, applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
 import { getUiText, resolveSystemLanguage } from './i18n';
@@ -134,6 +134,8 @@ export function App() {
   });
   const [ocrDraft, setOcrDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
+  const [indexDraft, setIndexDraft] = useState('1');
+  const [indexSuggestion, setIndexSuggestion] = useState<VideoIndexSuggestion | null>(null);
   const [isRenamingSourceDirectory, setIsRenamingSourceDirectory] = useState(false);
   const [sourceDirectoryRenameDraft, setSourceDirectoryRenameDraft] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -310,6 +312,35 @@ export function App() {
   }, [selectedItem?.id, selectedItem?.ocrText, selectedItem?.suggestedTitle]);
 
   useEffect(() => {
+    if (!api || !selectedItem) {
+      setIndexSuggestion(null);
+      setIndexDraft('1');
+      return;
+    }
+
+    let isActive = true;
+    api.suggestVideoIndex({ id: selectedItem.id })
+      .then((suggestion) => {
+        if (!isActive) {
+          return;
+        }
+        setIndexSuggestion(suggestion);
+        setIndexDraft(String(suggestion.suggestedIndex));
+      })
+      .catch((error) => {
+        if (!isActive) {
+          return;
+        }
+        setIndexSuggestion(null);
+        appendLog(i18n.indexSuggestionFailed(formatError(error)));
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [api, selectedItem?.id]);
+
+  useEffect(() => {
     if (!isRenamingSourceDirectory) {
       return;
     }
@@ -382,6 +413,32 @@ export function App() {
       }
     } catch (error) {
       appendLog(i18n.directoryPickerFailed(formatError(error)));
+    }
+  };
+
+  const handleSelectVideoFile = async () => {
+    if (!api) {
+      return;
+    }
+
+    try {
+      const selectedFile = await api.selectVideoFile(settings.inputDir);
+      if (!selectedFile) {
+        return;
+      }
+
+      const result = await api.loadSingleVideo(selectedFile);
+      setSettings((previous) => ({
+        ...previous,
+        inputDir: result.inputDir,
+        recentDirs: result.recentDirs
+      }));
+      setUiState((previous) => applyWorkerEvent(previous, { event: 'scan_result', items: result.items }));
+      setIndexSuggestion(result.indexSuggestion);
+      setIndexDraft(String(result.indexSuggestion.suggestedIndex));
+      appendLog(i18n.singleVideoLoadedLog(result.items[0]?.fileName ?? selectedFile));
+    } catch (error) {
+      appendLog(i18n.loadSingleVideoFailed(formatError(error)));
     }
   };
 
@@ -606,7 +663,11 @@ export function App() {
     }
 
     try {
-      const updatedItem = await api.renameOne(selectedItem.id, titleDraft);
+      const parsedIndex = Number(indexDraft);
+      const targetIndex = Number.isFinite(parsedIndex) && parsedIndex >= 1
+        ? Math.floor(parsedIndex)
+        : indexSuggestion?.suggestedIndex;
+      const updatedItem = await api.renameOne(selectedItem.id, titleDraft, targetIndex);
       setUiState((previous) => mergeReturnedItem(previous, updatedItem));
       appendLog(i18n.renameSelectedLog(updatedItem.fileName));
     } catch (error) {
@@ -657,6 +718,9 @@ export function App() {
               />
               <button type="button" className="button secondary" onClick={handleSelectDirectory}>
                 {i18n.browse}
+              </button>
+              <button type="button" className="button secondary" onClick={handleSelectVideoFile}>
+                {i18n.selectVideoFile}
               </button>
               <button type="button" className="button ghost" onClick={handleOpenDirectory} disabled={!settings.inputDir.trim()}>
                 {i18n.open}
@@ -844,6 +908,47 @@ export function App() {
                 <span className="meta-label">{i18n.targetFilename}</span>
                 <strong>{selectedItem?.newName || i18n.targetFilenameNotGenerated}</strong>
               </div>
+            </div>
+
+            <div className="single-index-panel">
+              <label className="field compact">
+                <span>{i18n.targetIndex}</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={indexDraft}
+                  onChange={(event) => setIndexDraft(event.target.value)}
+                  disabled={!selectedItem}
+                />
+              </label>
+              {indexSuggestion && indexSuggestion.candidateIndexes.length > 1 ? (
+                <label className="field compact">
+                  <span>{i18n.missingIndexCandidates}</span>
+                  <select
+                    value={indexSuggestion.candidateIndexes.includes(Number(indexDraft)) ? indexDraft : ''}
+                    onChange={(event) => {
+                      if (event.target.value) {
+                        setIndexDraft(event.target.value);
+                      }
+                    }}
+                    disabled={!selectedItem}
+                  >
+                    <option value="">{i18n.chooseMissingIndex}</option>
+                    {indexSuggestion.candidateIndexes.map((index) => (
+                      <option key={index} value={index}>
+                        {index}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <span className="index-hint">
+                {indexSuggestion
+                  ? indexSuggestion.isAutoIncrement
+                    ? i18n.indexAutoIncrementHint(indexSuggestion.suggestedIndex)
+                    : i18n.indexMissingHint(indexSuggestion.candidateIndexes)
+                  : i18n.indexSuggestionUnavailable}
+              </span>
             </div>
 
             {selectedItem?.error ? <div className="error-banner">{selectedItem.error}</div> : null}

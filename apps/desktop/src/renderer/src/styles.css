@@ -510,6 +510,23 @@ textarea {
   margin-top: 0.25rem;
 }
 
+.single-index-panel {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(7rem, 0.7fr) minmax(9rem, 1fr);
+  align-items: end;
+}
+
+.single-index-panel .field {
+  min-width: 0;
+}
+
+.index-hint {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .editor-block {
   display: grid;
   gap: 0.65rem;
@@ -666,6 +683,7 @@ textarea {
 
   .control-grid,
   .meta-grid,
+  .single-index-panel,
   .video-summary-grid {
     grid-template-columns: 1fr;
   }

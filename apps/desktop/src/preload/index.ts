@@ -5,6 +5,8 @@ import type {
   AppSettingsInput,
   ProcessingItem,
   RenameSourceDirectoryResult,
+  SingleVideoLoadResult,
+  VideoIndexSuggestion,
   WorkerEvent,
   WorkerLifecycleEvent
 } from '@videotitler/core';
@@ -30,9 +32,15 @@ const api = {
   saveSettings: (settings: AppSettingsInput): Promise<AppSettings> => invoke('app:save-settings', settings),
   selectDirectory: (defaultPath?: string): Promise<string | null> =>
     invoke('dialog:select-directory', defaultPath ? { defaultPath } : undefined),
+  selectVideoFile: (defaultPath?: string): Promise<string | null> =>
+    invoke('dialog:select-video-file', defaultPath ? { defaultPath } : undefined),
   openDirectory: (targetPath: string): Promise<void> => invoke('shell:open-directory', targetPath),
   scanVideos: (args: { directory: string; includeSubdirs: boolean }): Promise<ProcessingItem[]> =>
     invoke('worker:scan-videos', args),
+  loadSingleVideo: (filePath: string): Promise<SingleVideoLoadResult> =>
+    invoke('worker:load-single-video', { filePath }),
+  suggestVideoIndex: (args: { id?: string; filePath?: string }): Promise<VideoIndexSuggestion> =>
+    invoke('worker:suggest-video-index', args),
   startProcessing: (settings: AppSettingsInput): Promise<void> => invoke('worker:start-processing', settings),
   stopProcessing: (): Promise<void> => invoke('worker:stop-processing'),
   saveOcrEdit: (id: string, text: string): Promise<ProcessingItem> => invoke('worker:save-ocr-edit', { id, text }),
@@ -41,8 +49,8 @@ const api = {
     invoke('worker:rename-source-directory', { directory, newName }),
   generateTitle: (id: string, ocrText?: string): Promise<ProcessingItem> =>
     invoke('worker:generate-title', { id, ocrText }),
-  renameOne: (id: string, suggestedTitle?: string): Promise<ProcessingItem> =>
-    invoke('worker:rename-one', { id, suggestedTitle }),
+  renameOne: (id: string, suggestedTitle?: string, index?: number): Promise<ProcessingItem> =>
+    invoke('worker:rename-one', { id, suggestedTitle, index }),
   renameAll: (settings: AppSettingsInput): Promise<void> => invoke('worker:rename-all', settings),
   onWorkerEvent: (callback: (event: WorkerEvent) => void): Unsubscribe => subscribe('worker:event', callback),
   onWorkerLifecycle: (callback: (event: WorkerLifecycleEvent) => void): Unsubscribe =>

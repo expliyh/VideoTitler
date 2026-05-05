@@ -11,6 +11,7 @@ export type UiText = {
   sourceDirectory: string;
   chooseDirectoryPlaceholder: string;
   browse: string;
+  selectVideoFile: string;
   open: string;
   renameSourceDirectory: string;
   renameSourceDirectoryPlaceholder: string;
@@ -48,6 +49,12 @@ export type UiText = {
   currentStatus: string;
   targetFilename: string;
   targetFilenameNotGenerated: string;
+  targetIndex: string;
+  missingIndexCandidates: string;
+  chooseMissingIndex: string;
+  indexAutoIncrementHint: (index: number) => string;
+  indexMissingHint: (indexes: number[]) => string;
+  indexSuggestionUnavailable: string;
   ocrText: string;
   saveOcr: string;
   ocrPlaceholder: string;
@@ -90,11 +97,14 @@ export type UiText = {
   saveTitleLog: (name: string) => string;
   generateTitleLog: (name: string) => string;
   renameSelectedLog: (name: string) => string;
+  singleVideoLoadedLog: (name: string) => string;
   renameSourceDirectoryLog: (directory: string) => string;
   directoryPickerFailed: (message: string) => string;
   openDirectoryFailed: (message: string) => string;
   scanningDirectoryLog: (directory: string) => string;
   scanFailed: (message: string) => string;
+  loadSingleVideoFailed: (message: string) => string;
+  indexSuggestionFailed: (message: string) => string;
   renameSourceDirectoryEmptyName: string;
   renameSourceDirectoryUnchanged: string;
   startProcessingFailed: (message: string) => string;

@@ -13,7 +13,12 @@ from typing import Callable
 from videotitler.baidu_ocr import BaiduOcrClient
 from videotitler.config import AppConfig, load_non_secret_config, save_non_secret_config
 from videotitler.deepseek import DeepSeekTitleResult, extract_title_result
-from videotitler.rename import build_target_path, pick_non_conflicting_path
+from videotitler.rename import (
+    VideoIndexSuggestion,
+    build_target_path,
+    pick_non_conflicting_path,
+    suggest_video_index_for_path,
+)
 from videotitler.video import extract_frame_as_png_bytes
 
 
@@ -103,6 +108,8 @@ class DesktopWorker:
             "load_settings": self._handle_load_settings,
             "save_settings": self._handle_save_settings,
             "scan_videos": self._handle_scan_videos,
+            "load_single_video": self._handle_load_single_video,
+            "suggest_video_index": self._handle_suggest_video_index,
             "start_processing": self._handle_start_processing,
             "stop_processing": self._handle_stop_processing,
             "generate_title_from_ocr": self._handle_generate_title,
@@ -155,6 +162,48 @@ class DesktopWorker:
 
         self._emit_log(f"扫描完成，共发现 {len(videos)} 条视频。")
         return {"items": [self._serialize_item(item) for item in self._items]}
+
+    def _handle_load_single_video(self, params: dict[str, object]) -> dict[str, object]:
+        file_path = Path(self._get_str(params, "file_path", "filePath", "path"))
+        if not file_path.exists() or not file_path.is_file():
+            raise ValueError("Video file does not exist.")
+        if file_path.suffix.lower() not in VIDEO_EXTS:
+            raise ValueError("Selected file is not a supported video.")
+
+        with self._lock:
+            self._items = [WorkerVideoItem(id=uuid.uuid4().hex, path=file_path)]
+            self._items_by_id = {item.id: item for item in self._items}
+            self._config.input_dir = str(file_path.parent)
+            self._remember_recent_dir(self._config.input_dir)
+            save_non_secret_config(self._config_path, self._config)
+
+        suggestion = suggest_video_index_for_path(
+            file_path,
+            default_index_padding=self._config.index_padding,
+        )
+        self._emit_log(f"Loaded single video: {file_path.name}")
+        return {
+            "inputDir": self._config.input_dir,
+            "recentDirs": list(self._config.recent_dirs),
+            "items": [self._serialize_item(item) for item in self._items],
+            "indexSuggestion": self._serialize_index_suggestion(suggestion),
+        }
+
+    def _handle_suggest_video_index(self, params: dict[str, object]) -> dict[str, object]:
+        item_id = self._get_str(params, "id")
+        if item_id:
+            path = self._get_item(item_id).path
+        else:
+            path = Path(self._get_str(params, "file_path", "filePath", "path"))
+
+        return {
+            "indexSuggestion": self._serialize_index_suggestion(
+                suggest_video_index_for_path(
+                    path,
+                    default_index_padding=self._config.index_padding,
+                )
+            )
+        }
 
     def _handle_start_processing(self, params: dict[str, object]) -> dict[str, object]:
         self._ensure_not_busy()
@@ -278,7 +327,11 @@ class DesktopWorker:
         if not item.suggested_title.strip():
             raise ValueError("标题为空：请先编辑标题或点击“用 OCR 生成标题”。")
 
-        target = self._compute_target_path(item)
+        index_override = self._get_optional_int(params, "index", "manualIndex", "targetIndex")
+        if index_override is not None and index_override < 1:
+            raise ValueError("Index must be greater than or equal to 1.")
+
+        target = self._compute_target_path(item, index_override=index_override)
         item.new_name = target.name
 
         if self._config.dry_run:
@@ -435,12 +488,25 @@ class DesktopWorker:
         if self._task_thread and self._task_thread.is_alive():
             raise RuntimeError("批处理正在运行中，请先停止当前任务。")
 
-    def _compute_target_path(self, item: WorkerVideoItem) -> Path:
-        index = self._config.start_index + self._items.index(item)
+    def _compute_target_path(self, item: WorkerVideoItem, *, index_override: int | None = None) -> Path:
+        index_padding = self._config.index_padding
+        if len(self._items) == 1:
+            suggestion = suggest_video_index_for_path(
+                item.path,
+                default_index_padding=self._config.index_padding,
+            )
+            index_padding = suggestion.suggested_index_padding
+
+        if index_override is not None:
+            index = index_override
+        elif len(self._items) == 1:
+            index = suggestion.suggested_index
+        else:
+            index = self._config.start_index + self._items.index(item)
         target = build_target_path(
             item.path,
             index=index,
-            index_padding=self._config.index_padding,
+            index_padding=index_padding,
             title=item.suggested_title,
         )
         return pick_non_conflicting_path(target, ignore_path=item.path)
@@ -496,6 +562,14 @@ class DesktopWorker:
             "deepseekUserPromptTemplate": config.deepseek_user_prompt_template,
             "uiLanguage": config.ui_language,
             "recentDirs": list(config.recent_dirs),
+        }
+
+    def _serialize_index_suggestion(self, suggestion: VideoIndexSuggestion) -> dict[str, object]:
+        return {
+            "suggestedIndex": suggestion.suggested_index,
+            "candidateIndexes": list(suggestion.candidate_indexes),
+            "suggestedIndexPadding": suggestion.suggested_index_padding,
+            "isAutoIncrement": suggestion.is_auto_increment,
         }
 
     def _serialize_item(self, item: WorkerVideoItem) -> dict[str, object]:
@@ -656,6 +730,14 @@ class DesktopWorker:
                 continue
             return int(value)
         return int(default)
+
+    def _get_optional_int(self, values: dict[str, object], *keys: str) -> int | None:
+        for key in keys:
+            value = values.get(key)
+            if value is None or value == "":
+                continue
+            return int(value)
+        return None
 
     def _get_bool(self, values: dict[str, object], *keys: str, default: bool = False) -> bool:
         for key in keys:

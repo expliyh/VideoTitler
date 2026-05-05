@@ -5,6 +5,8 @@ import type {
   AppSettingsInput,
   ProcessingItem,
   RenameSourceDirectoryResult,
+  SingleVideoLoadResult,
+  VideoIndexSuggestion,
   WorkerEvent,
   WorkerLifecycleEvent
 } from '@videotitler/core';
@@ -119,6 +121,24 @@ export class DesktopBackend {
     return payload.items;
   }
 
+  async loadSingleVideo(filePath: string): Promise<SingleVideoLoadResult> {
+    const worker = await this.ensureWorker();
+    const payload = await worker.request<SingleVideoLoadResult>('load_single_video', {
+      filePath
+    });
+    this.options.onWorkerEvent({
+      event: 'scan_result',
+      items: payload.items
+    });
+    return payload;
+  }
+
+  async suggestVideoIndex(args: { id?: string; filePath?: string }): Promise<VideoIndexSuggestion> {
+    const worker = await this.ensureWorker();
+    const payload = await worker.request<{ indexSuggestion: VideoIndexSuggestion }>('suggest_video_index', args);
+    return payload.indexSuggestion;
+  }
+
   async startProcessing(settings: AppSettingsInput): Promise<void> {
     const worker = await this.ensureWorker();
     const secrets = await this.readSecrets();
@@ -164,11 +184,12 @@ export class DesktopBackend {
     return payload.item;
   }
 
-  async renameOne(id: string, suggestedTitle?: string): Promise<ProcessingItem> {
+  async renameOne(id: string, suggestedTitle?: string, index?: number): Promise<ProcessingItem> {
     const worker = await this.ensureWorker();
     const payload = await worker.request<{ item: ProcessingItem }>('rename_one', {
       id,
-      suggestedTitle
+      suggestedTitle,
+      index
     });
     return payload.item;
   }

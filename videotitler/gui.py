@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover
 from videotitler.baidu_ocr import BaiduOcrClient, BaiduOcrError
 from videotitler.config import AppConfig, default_config_path, load_config, save_config
 from videotitler.deepseek import DeepSeekError, extract_title_result
-from videotitler.rename import build_target_path, pick_non_conflicting_path
+from videotitler.rename import build_target_path, pick_non_conflicting_path, suggest_video_index_for_path
 from videotitler.video import VideoFrameError, extract_frame_as_png_bytes
 
 
@@ -89,6 +89,10 @@ class VideoTitlerApp:
         self._queue: "Queue[tuple[str, object]]" = Queue()
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
+        self._selected_index_var: object | None = None
+        self._index_candidate_var: object | None = None
+        self._index_hint_var: object | None = None
+        self._index_candidate_combo: object | None = None
 
         self._img_cache: ImageTk.PhotoImage | None = None
 
@@ -112,6 +116,9 @@ class VideoTitlerApp:
         self._dir_entry.pack(side=LEFT, fill=X, expand=True, padx=(8, 8))
         ttk.Button(top, text="浏览…", command=self._pick_dir, bootstyle="secondary").pack(
             side=LEFT
+        )
+        ttk.Button(top, text="单个视频", command=self._pick_video, bootstyle="secondary").pack(
+            side=LEFT, padx=(8, 0)
         )
         ttk.Button(top, text="扫描", command=self._scan, bootstyle="info").pack(
             side=LEFT, padx=(8, 0)
@@ -260,6 +267,37 @@ class VideoTitlerApp:
             bootstyle="secondary",
         ).pack(side=LEFT)
 
+        index_bar = ttk.Frame(tab_ocr)
+        index_bar.pack(fill=X, pady=(0, 8))
+        ttk.Label(index_bar, text="序号").pack(side=LEFT)
+        self._selected_index_var = ttk.IntVar(value=1)
+        ttk.Spinbox(
+            index_bar,
+            from_=1,
+            to=1_000_000,
+            width=8,
+            textvariable=self._selected_index_var,
+        ).pack(side=LEFT, padx=(8, 8))
+        ttk.Label(index_bar, text="缺失候选").pack(side=LEFT)
+        self._index_candidate_var = ttk.StringVar(value="")
+        self._index_candidate_combo = ttk.Combobox(
+            index_bar,
+            textvariable=self._index_candidate_var,
+            width=10,
+            values=(),
+            state="disabled",
+        )
+        self._index_candidate_combo.pack(side=LEFT, padx=(8, 8))
+        self._index_candidate_combo.bind("<<ComboboxSelected>>", self._on_index_candidate_selected)
+        ttk.Button(
+            index_bar,
+            text="自动序号",
+            command=self._refresh_selected_index_suggestion,
+            bootstyle="secondary",
+        ).pack(side=LEFT, padx=(0, 8))
+        self._index_hint_var = ttk.StringVar(value="")
+        ttk.Label(index_bar, textvariable=self._index_hint_var).pack(side=LEFT, fill=X, expand=True)
+
         self._error_var = ttk.StringVar(value="")
         self._error_label = ttk.Label(tab_ocr, textvariable=self._error_var, bootstyle="danger")
         self._error_label.pack(fill=X, pady=(0, 8))
@@ -364,12 +402,79 @@ class VideoTitlerApp:
         return None
 
     def _compute_index_for_row(self, row: VideoRow) -> int:
+        if self._get_selected_row() is row and self._selected_index_var is not None:
+            try:
+                selected_index = int(self._selected_index_var.get() or 0)  # type: ignore[union-attr]
+                if selected_index >= 1:
+                    return selected_index
+            except Exception:
+                pass
+
         cfg = self._read_ui_to_config()
         try:
             offset = self._rows.index(row)
         except ValueError:
             offset = 0
         return int(cfg.start_index or 1) + offset
+
+    def _apply_index_suggestion(self, row: VideoRow) -> None:
+        if self._selected_index_var is None or self._index_hint_var is None:
+            return
+
+        try:
+            cfg = self._read_ui_to_config()
+            suggestion = suggest_video_index_for_path(
+                row.path,
+                default_index_padding=cfg.index_padding,
+            )
+        except Exception as exc:
+            self._index_hint_var.set(f"序号建议失败：{exc}")
+            return
+
+        self._selected_index_var.set(int(suggestion.suggested_index))  # type: ignore[union-attr]
+        if self._index_candidate_combo is not None and self._index_candidate_var is not None:
+            candidates = [str(index) for index in suggestion.candidate_indexes]
+            self._index_candidate_combo.configure(values=tuple(candidates))  # type: ignore[union-attr]
+            if len(candidates) > 1:
+                self._index_candidate_var.set(candidates[0])  # type: ignore[union-attr]
+                self._index_candidate_combo.configure(state="readonly")  # type: ignore[union-attr]
+            else:
+                self._index_candidate_var.set("")  # type: ignore[union-attr]
+                self._index_candidate_combo.configure(state="disabled")  # type: ignore[union-attr]
+
+        if suggestion.candidate_indexes:
+            self._index_hint_var.set(f"缺失序号：{', '.join(str(i) for i in suggestion.candidate_indexes)}")
+        else:
+            self._index_hint_var.set(f"未发现缺口，自动递增为 {suggestion.suggested_index}")
+
+    def _compute_padding_for_row(self, row: VideoRow, cfg: AppConfig) -> int:
+        if len(self._rows) == 1:
+            return suggest_video_index_for_path(
+                row.path,
+                default_index_padding=cfg.index_padding,
+            ).suggested_index_padding
+        return int(cfg.index_padding or 3)
+
+    def _refresh_selected_index_suggestion(self) -> None:
+        row = self._get_selected_row()
+        if row is None:
+            self._append_log("请先选择一条视频。")
+            return
+        self._apply_index_suggestion(row)
+        self._update_new_name_preview(row)
+        self._update_row(row.path, new_name=row.new_name)
+
+    def _on_index_candidate_selected(self, _event: object) -> None:
+        if self._selected_index_var is None or self._index_candidate_var is None:
+            return
+        value = str(self._index_candidate_var.get() or "").strip()  # type: ignore[union-attr]
+        if not value:
+            return
+        self._selected_index_var.set(int(value))  # type: ignore[union-attr]
+        row = self._get_selected_row()
+        if row is not None:
+            self._update_new_name_preview(row)
+            self._update_row(row.path, new_name=row.new_name)
 
     def _update_new_name_preview(self, row: VideoRow) -> None:
         cfg = self._read_ui_to_config()
@@ -379,7 +484,7 @@ class VideoTitlerApp:
         target = build_target_path(
             row.path,
             index=self._compute_index_for_row(row),
-            index_padding=cfg.index_padding,
+            index_padding=self._compute_padding_for_row(row, cfg),
             title=row.title,
         )
         row.new_name = target.name
@@ -390,6 +495,40 @@ class VideoTitlerApp:
         selected = filedialog.askdirectory(initialdir=self._dir_var.get() or None)
         if selected:
             self._dir_var.set(selected)
+
+    def _pick_video(self) -> None:
+        from tkinter import filedialog
+
+        selected = filedialog.askopenfilename(
+            initialdir=self._dir_var.get() or None,
+            filetypes=[
+                ("Video files", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not selected:
+            return
+
+        path = Path(selected)
+        self._dir_var.set(str(path.parent))
+        self._rows = [VideoRow(path=path)]
+
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+
+        row = self._rows[0]
+        self._tree.insert(
+            "",
+            END,
+            iid=str(row.path),
+            values=(row.path.name, row.status, row.title, row.new_name),
+        )
+        self._tree.selection_set(str(row.path))
+        self._tree.focus(str(row.path))
+        self._progress.configure(value=0, maximum=1)
+        self._apply_index_suggestion(row)
+        self._sync_selected_details(row)
+        self._append_log(f"已加载单个视频：{path.name}")
 
     def _open_dir(self) -> None:
         import os
@@ -461,7 +600,7 @@ class VideoTitlerApp:
 
         src_path = row.path
         index = self._compute_index_for_row(row)
-        padding = cfg.index_padding
+        padding = self._compute_padding_for_row(row, cfg)
         system_prompt = cfg.deepseek_system_prompt
         user_prompt_template = cfg.deepseek_user_prompt_template
         base_url = cfg.deepseek_base_url
@@ -517,7 +656,12 @@ class VideoTitlerApp:
         old_path = row.path
         row.title = title
         index = self._compute_index_for_row(row)
-        target = build_target_path(old_path, index=index, index_padding=cfg.index_padding, title=title)
+        target = build_target_path(
+            old_path,
+            index=index,
+            index_padding=self._compute_padding_for_row(row, cfg),
+            title=title,
+        )
         target = pick_non_conflicting_path(target, ignore_path=old_path)
         row.new_name = target.name
 
@@ -655,6 +799,12 @@ class VideoTitlerApp:
             )
 
         self._progress.configure(value=0, maximum=max(1, len(self._rows)))
+        if len(self._rows) == 1:
+            row = self._rows[0]
+            self._tree.selection_set(str(row.path))
+            self._tree.focus(str(row.path))
+            self._apply_index_suggestion(row)
+            self._sync_selected_details(row)
         self._append_log(f"扫描到 {len(self._rows)} 个视频。")
 
     def _start(self) -> None:
@@ -696,13 +846,13 @@ class VideoTitlerApp:
 
     def _run_rename_all(self, cfg: AppConfig) -> None:
         start_index = int(cfg.start_index or 1)
-        index_padding = int(cfg.index_padding or 3)
 
         for offset, row in enumerate(self._rows):
             if self._stop_event.is_set():
                 break
 
             fixed_index = start_index + offset
+            row_index_padding = self._compute_padding_for_row(row, cfg)
             title = (row.title or "").strip() or "未识别"
 
             old_path = row.path
@@ -710,7 +860,7 @@ class VideoTitlerApp:
                 target = build_target_path(
                     old_path,
                     index=fixed_index,
-                    index_padding=index_padding,
+                    index_padding=row_index_padding,
                     title=title,
                 )
                 target = pick_non_conflicting_path(target, ignore_path=old_path)
@@ -742,6 +892,7 @@ class VideoTitlerApp:
                 break
 
             fixed_index = int(cfg.start_index or 1) + offset
+            row_index_padding = self._compute_padding_for_row(row, cfg)
             stage = "读取帧"
             self._queue.put(("status", (row.path, "读取帧…")))
             try:
@@ -769,7 +920,7 @@ class VideoTitlerApp:
                 target = build_target_path(
                     row.path,
                     index=fixed_index,
-                    index_padding=cfg.index_padding,
+                    index_padding=row_index_padding,
                     title=title,
                 )
                 target = pick_non_conflicting_path(target, ignore_path=row.path)
@@ -930,6 +1081,7 @@ class VideoTitlerApp:
         row = self._get_selected_row()
         if row is None:
             return
+        self._apply_index_suggestion(row)
         self._sync_selected_details(row)
 
     def _set_preview_image(self, path: Path, image: Image.Image) -> None:

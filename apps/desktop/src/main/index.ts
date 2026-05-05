@@ -82,6 +82,27 @@ function registerIpcHandlers(): void {
     return result.canceled ? null : result.filePaths[0];
   });
 
+  ipcMain.handle('dialog:select-video-file', async (_event, args?: { defaultPath?: string }) => {
+    const options: OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Videos',
+          extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v']
+        }
+      ]
+    };
+
+    if (args?.defaultPath?.trim()) {
+      options.defaultPath = args.defaultPath.trim();
+    }
+
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : result.filePaths[0];
+  });
+
   ipcMain.handle('shell:open-directory', async (_event, targetPath: string) => {
     const openError = await shell.openPath(targetPath);
     if (openError) {
@@ -93,6 +114,8 @@ function registerIpcHandlers(): void {
     'worker:scan-videos',
     async (_event, args: { directory: string; includeSubdirs: boolean }) => getBackend().scanVideos(args)
   );
+  ipcMain.handle('worker:load-single-video', async (_event, args: { filePath: string }) => getBackend().loadSingleVideo(args.filePath));
+  ipcMain.handle('worker:suggest-video-index', async (_event, args: { id?: string; filePath?: string }) => getBackend().suggestVideoIndex(args));
   ipcMain.handle('worker:start-processing', async (_event, settings: AppSettingsInput) => getBackend().startProcessing(settings));
   ipcMain.handle('worker:stop-processing', async () => getBackend().stopProcessing());
   ipcMain.handle('worker:save-ocr-edit', async (_event, args: { id: string; text: string }) => getBackend().saveOcrEdit(args.id, args.text));
@@ -102,7 +125,7 @@ function registerIpcHandlers(): void {
     async (_event, args: { directory: string; newName: string }) => getBackend().renameSourceDirectory(args.directory, args.newName)
   );
   ipcMain.handle('worker:generate-title', async (_event, args: { id: string; ocrText?: string }) => getBackend().generateTitle(args.id, args.ocrText));
-  ipcMain.handle('worker:rename-one', async (_event, args: { id: string; suggestedTitle?: string }) => getBackend().renameOne(args.id, args.suggestedTitle));
+  ipcMain.handle('worker:rename-one', async (_event, args: { id: string; suggestedTitle?: string; index?: number }) => getBackend().renameOne(args.id, args.suggestedTitle, args.index));
   ipcMain.handle('worker:rename-all', async (_event, settings: AppSettingsInput) => getBackend().renameAll(settings));
 }
 

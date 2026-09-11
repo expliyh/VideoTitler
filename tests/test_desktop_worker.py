@@ -71,9 +71,13 @@ class DesktopWorkerTests(unittest.TestCase):
                 deepseek_api_key="deepseek-key",
                 deepseek_base_url="https://api.deepseek.com/v1",
                 deepseek_model="deepseek-chat",
+                recognition_mode="vision",
+                deepseek_vision_model="custom-vision",
                 deepseek_thinking_enabled=False,
                 deepseek_system_prompt="system",
                 deepseek_user_prompt_template="user {ocr_text}",
+                deepseek_vision_system_prompt="vision system",
+                deepseek_vision_user_prompt_template="vision user",
                 recent_dirs=["C:/videos", "D:/clips"],
             )
 
@@ -89,13 +93,135 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertEqual(loaded.baidu_ocr_mode, "accurate_basic")
             self.assertEqual(loaded.deepseek_base_url, "https://api.deepseek.com/v1")
             self.assertEqual(loaded.deepseek_model, "deepseek-chat")
+            self.assertEqual(loaded.recognition_mode, "vision")
+            self.assertEqual(loaded.deepseek_vision_model, "custom-vision")
             self.assertFalse(loaded.deepseek_thinking_enabled)
             self.assertEqual(loaded.deepseek_system_prompt, "system")
             self.assertEqual(loaded.deepseek_user_prompt_template, "user {ocr_text}")
+            self.assertEqual(loaded.deepseek_vision_system_prompt, "vision system")
+            self.assertEqual(loaded.deepseek_vision_user_prompt_template, "vision user")
             self.assertEqual(loaded.recent_dirs, ["C:/videos", "D:/clips"])
             self.assertEqual(loaded.baidu_api_key, "")
             self.assertEqual(loaded.baidu_secret_key, "")
             self.assertEqual(loaded.deepseek_api_key, "")
+
+    def test_vision_processing_skips_ocr_and_emits_task_fields_without_baidu_keys(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(b"")
+            events: list[dict[str, object]] = []
+            ocr_calls: list[object] = []
+            vision_calls: list[dict[str, object]] = []
+
+            def vision_extractor(**kwargs: object) -> dict[str, str]:
+                vision_calls.append(kwargs)
+                return {
+                    "chapter_title": "第一章",
+                    "section_title": "准备",
+                    "task_summary": "找到营地",
+                    "task_details": "前往地图北侧的营地并调查入口",
+                    "suggested_title": "调查营地入口",
+                    "raw_text": "{...}",
+                }
+
+            worker = self._create_worker(
+                root / "settings.json",
+                emit=events.append,
+                frame_extractor=lambda _path, _frame: b"frame-bytes",
+                ocr_recognizer=lambda *args, **kwargs: ocr_calls.append(args) or "unexpected",
+                vision_extractor=vision_extractor,
+            )
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "inputDir": str(root),
+                        "recognitionMode": "vision",
+                        "deepseekVisionModel": "deepseek-v4-flash",
+                        "deepseekVisionSystemPrompt": "vision system",
+                        "deepseekVisionUserPromptTemplate": "vision user",
+                        "dryRun": True,
+                    }
+                },
+            )
+            worker.handle_request("scan_videos", {"directory": str(root), "includeSubdirs": False})
+            worker.handle_request("start_processing", {"secrets": {"deepseekApiKey": "key"}})
+            worker.wait_for_idle(timeout=3)
+
+            self.assertEqual(ocr_calls, [])
+            self.assertEqual(vision_calls[0]["image_bytes"], b"frame-bytes")
+            item = worker.handle_request("get_items", {})["items"][0]
+            self.assertEqual(item["chapterTitle"], "第一章")
+            self.assertEqual(item["taskDetails"], "前往地图北侧的营地并调查入口")
+            self.assertEqual(item["suggestedTitle"], "调查营地入口")
+            self.assertIn("item_vision", [event["event"] for event in events])
+            self.assertIn("done", [event["event"] for event in events])
+
+    def test_save_vision_edit_updates_fields_and_target_name(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(b"")
+            worker = self._create_worker(root / "settings.json")
+            item_id = worker.handle_request("scan_videos", {"directory": str(root), "includeSubdirs": False})["items"][0]["id"]
+
+            result = worker.handle_request(
+                "save_vision_edit",
+                {
+                    "id": item_id,
+                    "chapterTitle": "第二章",
+                    "sectionTitle": "追踪",
+                    "taskSummary": "追踪目标",
+                    "taskDetails": "沿着脚印前进",
+                    "suggestedTitle": "追踪目标",
+                },
+            )
+
+            self.assertEqual(result["item"]["taskSummary"], "追踪目标")
+            self.assertEqual(result["item"]["newName"], "001-追踪目标.mp4")
+
+    def test_generate_title_in_vision_mode_reextracts_frame_when_not_cached(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(b"")
+            extracted: list[str] = []
+
+            def frame_extractor(path: Path, frame_number: int) -> bytes:
+                extracted.append(f"{path.name}:{frame_number}")
+                return b"fresh-frame"
+
+            worker = self._create_worker(
+                root / "settings.json",
+                frame_extractor=frame_extractor,
+                vision_extractor=lambda **kwargs: {
+                    "chapter_title": "第一章",
+                    "section_title": "任务",
+                    "task_summary": "调查",
+                    "task_details": "调查现场",
+                    "suggested_title": "调查现场",
+                },
+            )
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "inputDir": str(root),
+                        "recognitionMode": "vision",
+                        "frameNumber": 9,
+                    }
+                },
+            )
+            item_id = worker.handle_request("scan_videos", {"directory": str(root), "includeSubdirs": False})["items"][0]["id"]
+
+            result = worker.handle_request(
+                "generate_title_from_ocr",
+                {"id": item_id, "secrets": {"deepseekApiKey": "key"}},
+            )
+
+            self.assertEqual(extracted, ["clip.mp4:9"])
+            self.assertEqual(result["item"]["suggestedTitle"], "调查现场")
 
     def test_save_settings_supports_deepseek_thinking_mode(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -574,6 +700,7 @@ class DesktopWorkerTests(unittest.TestCase):
         frame_extractor=None,
         ocr_recognizer=None,
         title_extractor=None,
+        vision_extractor=None,
     ) -> DesktopWorker:
         return DesktopWorker(
             config_path=config_path,
@@ -581,6 +708,7 @@ class DesktopWorkerTests(unittest.TestCase):
             frame_extractor=frame_extractor,
             ocr_recognizer=ocr_recognizer,
             title_extractor=title_extractor,
+            vision_extractor=vision_extractor,
         )
 
 

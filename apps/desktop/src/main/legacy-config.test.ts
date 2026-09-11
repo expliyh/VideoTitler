@@ -29,6 +29,7 @@ test('migrateLegacyConfigIfNeeded copies legacy settings and secrets when no new
       {
         input_dir: 'C:/videos',
         include_subdirs: true,
+        recognition_mode: 'vision',
         frame_number_1based: 9,
         start_index: 3,
         index_padding: 4,
@@ -39,8 +40,12 @@ test('migrateLegacyConfigIfNeeded copies legacy settings and secrets when no new
         deepseek_api_key: 'legacy-deepseek-key',
         deepseek_base_url: 'https://api.deepseek.com/v1',
         deepseek_model: 'deepseek-chat',
+        deepseek_vision_model: 'deepseek-v4-flash',
+        deepseek_thinking_enabled: false,
         deepseek_system_prompt: 'system prompt',
         deepseek_user_prompt_template: 'user {ocr_text}',
+        deepseek_vision_system_prompt: 'vision system prompt',
+        deepseek_vision_user_prompt_template: 'vision user prompt',
         ui_language: 'fr',
         save_keys_locally: true,
         recent_dirs: ['C:/videos']
@@ -62,6 +67,11 @@ test('migrateLegacyConfigIfNeeded copies legacy settings and secrets when no new
   const rawSettings = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>;
   assert.equal(rawSettings.input_dir, 'C:/videos');
   assert.equal(rawSettings.include_subdirs, true);
+  assert.equal(rawSettings.recognition_mode, 'vision');
+  assert.equal(rawSettings.deepseek_vision_model, 'deepseek-v4-flash');
+  assert.equal(rawSettings.deepseek_thinking_enabled, false);
+  assert.equal(rawSettings.deepseek_vision_system_prompt, 'vision system prompt');
+  assert.equal(rawSettings.deepseek_vision_user_prompt_template, 'vision user prompt');
   assert.equal(rawSettings.baidu_api_key, undefined);
   assert.equal(rawSettings.deepseek_api_key, undefined);
   assert.equal(rawSettings.ui_language, 'fr');

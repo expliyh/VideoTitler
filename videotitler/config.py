@@ -10,6 +10,10 @@ class AppConfig:
     input_dir: str = ""
     include_subdirs: bool = False
 
+    # Recognition pipeline: "ocr" keeps the legacy Baidu OCR flow;
+    # "vision" sends the extracted frame directly to DeepSeek.
+    recognition_mode: str = "ocr"
+
     frame_number_1based: int = 1
 
     start_index: int = 1
@@ -23,6 +27,7 @@ class AppConfig:
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-v4-pro"
+    deepseek_vision_model: str = "deepseek-v4-flash"
     deepseek_thinking_enabled: bool = True
     deepseek_system_prompt: str = (
         "你是标题提炼助手。你会从杂乱的 OCR 文本中提取一个适合作为短视频标题的中文短句。"
@@ -36,6 +41,19 @@ class AppConfig:
         "OCR 文本：\n{ocr_text}\n\n"
         "输出要求：只输出标题一行。"
     )
+    deepseek_vision_system_prompt: str = (
+        "你是游戏任务界面视觉理解助手。请只根据用户消息中的游戏截图实际可见内容进行识别，"
+        "不要把界面图标、装饰图案或不确定的符号臆测成文字，也不要补全截图中不可见的信息。"
+        "请严格只输出一个 JSON 对象，不要 Markdown、解释或额外文字。JSON 必须包含字符串字段："
+        "chapter_title（章标题）、section_title（节标题）、task_summary（任务简述）、"
+        "task_details（详细任务内容）、suggested_title（适合视频文件名的简短标题）。"
+        "如果某项在画面中不存在或无法确认，填写空字符串；suggested_title 尽量不超过 20 个汉字。"
+    )
+    deepseek_vision_user_prompt_template: str = (
+        "请观察这张游戏任务界面截图，识别当前正在进行的任务信息。"
+        "分别提取章标题、节标题、任务简述和详细任务内容，并生成一个适合用于视频文件名的简短建议标题。"
+        "只返回约定的 JSON 字段，不要输出识别过程。"
+    )
 
     ui_language: str = "system"
 
@@ -47,6 +65,7 @@ class AppConfig:
 _NON_SECRET_FIELDS = {
     "input_dir",
     "include_subdirs",
+    "recognition_mode",
     "frame_number_1based",
     "start_index",
     "index_padding",
@@ -54,9 +73,12 @@ _NON_SECRET_FIELDS = {
     "baidu_ocr_mode",
     "deepseek_base_url",
     "deepseek_model",
+    "deepseek_vision_model",
     "deepseek_thinking_enabled",
     "deepseek_system_prompt",
     "deepseek_user_prompt_template",
+    "deepseek_vision_system_prompt",
+    "deepseek_vision_user_prompt_template",
     "ui_language",
     "recent_dirs",
 }

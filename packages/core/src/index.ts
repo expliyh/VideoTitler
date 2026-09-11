@@ -24,6 +24,7 @@ export type RenameRequestItem = {
 };
 
 export type OcrMode = 'accurate_basic' | 'general_basic';
+export type RecognitionMode = 'ocr' | 'vision';
 export type SupportedLanguage = 'en' | 'zh' | 'fr';
 export type LanguageSetting = 'system' | SupportedLanguage;
 
@@ -40,12 +41,16 @@ export type AppSettings = {
   startIndex: number;
   indexPadding: number;
   dryRun: boolean;
+  recognitionMode: RecognitionMode;
   ocrMode: OcrMode;
   deepseekBaseUrl: string;
   deepseekModel: string;
+  deepseekVisionModel: string;
   deepseekThinkingEnabled: boolean;
   deepseekSystemPrompt: string;
   deepseekUserPromptTemplate: string;
+  deepseekVisionSystemPrompt: string;
+  deepseekVisionUserPromptTemplate: string;
   uiLanguage: LanguageSetting;
   recentDirs: string[];
   secretsState: AppSecretsState;
@@ -71,6 +76,10 @@ export type ProcessingItem = {
   newName: string;
   error: string;
   previewDataUrl: string;
+  chapterTitle: string;
+  sectionTitle: string;
+  taskSummary: string;
+  taskDetails: string;
 };
 
 export type RenameSourceDirectoryResult = {
@@ -131,6 +140,18 @@ export type WorkerItemTitleEvent = {
   newName: string;
 };
 
+export type WorkerItemVisionEvent = {
+  event: 'item_vision';
+  id: string;
+  chapterTitle: string;
+  sectionTitle: string;
+  taskSummary: string;
+  taskDetails: string;
+  suggestedTitle: string;
+  deepseekRawText: string;
+  newName: string;
+};
+
 export type WorkerItemStatusEvent = {
   event: 'item_status';
   id: string;
@@ -173,6 +194,7 @@ export type WorkerEvent =
   | WorkerItemPreviewEvent
   | WorkerItemOcrEvent
   | WorkerItemTitleEvent
+  | WorkerItemVisionEvent
   | WorkerItemStatusEvent
   | WorkerItemRenamedEvent
   | WorkerProgressEvent

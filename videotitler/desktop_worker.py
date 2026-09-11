@@ -6,13 +6,18 @@ import re
 import threading
 import traceback
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from videotitler.baidu_ocr import BaiduOcrClient
 from videotitler.config import AppConfig, load_non_secret_config, save_non_secret_config
-from videotitler.deepseek import DeepSeekTitleResult, extract_title_result
+from videotitler.deepseek import (
+    DeepSeekTitleResult,
+    DeepSeekVisionResult,
+    extract_title_result,
+    extract_vision_result,
+)
 from videotitler.rename import (
     VideoIndexSuggestion,
     build_target_path,
@@ -63,6 +68,27 @@ def _default_ocr_recognizer(
     return client.recognize(png_bytes, endpoint=endpoint)
 
 
+def _default_vision_extractor(
+    image_bytes: bytes,
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    system_prompt: str,
+    user_prompt_template: str,
+    thinking_enabled: bool,
+) -> DeepSeekVisionResult:
+    return extract_vision_result(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        image_bytes=image_bytes,
+        system_prompt=system_prompt,
+        user_prompt_template=user_prompt_template,
+        thinking_enabled=thinking_enabled,
+    )
+
+
 @dataclass(slots=True)
 class WorkerVideoItem:
     id: str
@@ -74,6 +100,11 @@ class WorkerVideoItem:
     new_name: str = ""
     error: str = ""
     preview_data_url: str = ""
+    chapter_title: str = ""
+    section_title: str = ""
+    task_summary: str = ""
+    task_details: str = ""
+    frame_bytes: bytes = field(default=b"", repr=False)
 
     @property
     def file_name(self) -> str:
@@ -89,12 +120,14 @@ class DesktopWorker:
         frame_extractor: Callable[[Path, int], bytes] | None = None,
         ocr_recognizer: Callable[..., str] | None = None,
         title_extractor: Callable[..., object] | None = None,
+        vision_extractor: Callable[..., object] | None = None,
     ) -> None:
         self._config_path = config_path
         self._emit = emit
         self._frame_extractor = frame_extractor or _default_frame_extractor
         self._ocr_recognizer = ocr_recognizer or _default_ocr_recognizer
         self._title_extractor = title_extractor or extract_title_result
+        self._vision_extractor = vision_extractor or _default_vision_extractor
 
         self._config = load_non_secret_config(self._config_path)
         self._items: list[WorkerVideoItem] = []
@@ -114,6 +147,7 @@ class DesktopWorker:
             "stop_processing": self._handle_stop_processing,
             "generate_title_from_ocr": self._handle_generate_title,
             "save_ocr_edit": self._handle_save_ocr_edit,
+            "save_vision_edit": self._handle_save_vision_edit,
             "save_title_edit": self._handle_save_title_edit,
             "rename_source_directory": self._handle_rename_source_directory,
             "rename_one": self._handle_rename_one,
@@ -207,11 +241,11 @@ class DesktopWorker:
 
     def _handle_start_processing(self, params: dict[str, object]) -> dict[str, object]:
         self._ensure_not_busy()
-        secrets = self._normalize_secrets(self._as_dict(params.get("secrets")))
         settings = self._normalize_settings(self._as_dict(params.get("settings"))) if params.get("settings") else None
         if settings is not None:
             with self._lock:
                 self._config = settings
+        secrets = self._normalize_secrets(self._as_dict(params.get("secrets")))
 
         self._stop_event.clear()
         self._task_thread = threading.Thread(
@@ -232,31 +266,53 @@ class DesktopWorker:
         self._ensure_not_busy()
         item = self._get_item(self._get_str(params, "id"))
         secrets = self._normalize_secrets(self._as_dict(params.get("secrets")))
-        if "ocrText" in params or "ocr_text" in params:
-            item.ocr_text = self._get_str(params, "ocr_text", "ocrText")
-        if not item.ocr_text.strip():
-            raise ValueError("OCR 文本为空：请先编辑/粘贴识别结果。")
 
-        item.status = "DeepSeek…"
+        item.status = "视觉识别…" if self._is_vision_mode() else "DeepSeek…"
         item.error = ""
         self._emit_item_status(item)
 
-        title, raw_text = self._extract_title_and_raw_text(
-            api_key=secrets["deepseekApiKey"],
-            base_url=self._config.deepseek_base_url,
-            model=self._config.deepseek_model,
-            ocr_text=item.ocr_text,
-            system_prompt=self._config.deepseek_system_prompt,
-            user_prompt_template=self._config.deepseek_user_prompt_template,
-            thinking_enabled=self._config.deepseek_thinking_enabled,
-        )
+        if self._is_vision_mode():
+            item.ocr_text = ""
+            self._ensure_frame_bytes(item)
+            vision = self._extract_vision_result(
+                api_key=secrets["deepseekApiKey"],
+                base_url=self._config.deepseek_base_url,
+                model=self._config.deepseek_vision_model,
+                image_bytes=item.frame_bytes,
+                system_prompt=self._config.deepseek_vision_system_prompt,
+                user_prompt_template=self._config.deepseek_vision_user_prompt_template,
+                thinking_enabled=self._config.deepseek_thinking_enabled,
+            )
+            self._apply_vision_result(item, vision)
+        else:
+            item.chapter_title = ""
+            item.section_title = ""
+            item.task_summary = ""
+            item.task_details = ""
+            if "ocrText" in params or "ocr_text" in params:
+                item.ocr_text = self._get_str(params, "ocr_text", "ocrText")
+            if not item.ocr_text.strip():
+                raise ValueError("OCR 文本为空：请先编辑/粘贴识别结果。")
 
-        item.suggested_title = title
-        item.deepseek_raw_text = raw_text
+            title, raw_text = self._extract_title_and_raw_text(
+                api_key=secrets["deepseekApiKey"],
+                base_url=self._config.deepseek_base_url,
+                model=self._config.deepseek_model,
+                ocr_text=item.ocr_text,
+                system_prompt=self._config.deepseek_system_prompt,
+                user_prompt_template=self._config.deepseek_user_prompt_template,
+                thinking_enabled=self._config.deepseek_thinking_enabled,
+            )
+            item.suggested_title = title
+            item.deepseek_raw_text = raw_text
+
         item.new_name = self._compute_target_path(item).name
         item.status = "待重命名"
         item.error = ""
-        self._emit_item_title(item)
+        if self._is_vision_mode():
+            self._emit_item_vision(item)
+        else:
+            self._emit_item_title(item)
         self._emit_item_status(item)
         self._emit_log(f"已生成标题：{item.file_name}")
         return {"item": self._serialize_item(item)}
@@ -267,6 +323,20 @@ class DesktopWorker:
         item.error = ""
         item.status = "已编辑"
         self._emit_log(f"已保存 OCR 编辑：{item.file_name}")
+        return {"item": self._serialize_item(item)}
+
+    def _handle_save_vision_edit(self, params: dict[str, object]) -> dict[str, object]:
+        item = self._get_item(self._get_str(params, "id"))
+        item.chapter_title = self._get_str(params, "chapter_title", "chapterTitle")
+        item.section_title = self._get_str(params, "section_title", "sectionTitle")
+        item.task_summary = self._get_str(params, "task_summary", "taskSummary")
+        item.task_details = self._get_str(params, "task_details", "taskDetails")
+        item.suggested_title = self._get_str(params, "suggested_title", "suggestedTitle")
+        item.error = ""
+        item.status = "已编辑"
+        item.new_name = self._compute_target_path(item).name if item.suggested_title.strip() else ""
+        self._emit_item_vision(item)
+        self._emit_log(f"已保存视觉任务信息：{item.file_name}")
         return {"item": self._serialize_item(item)}
 
     def _handle_save_title_edit(self, params: dict[str, object]) -> dict[str, object]:
@@ -392,33 +462,56 @@ class DesktopWorker:
                 self._emit_item_status(item)
 
                 png_bytes = self._frame_extractor(item.path, self._config.frame_number_1based)
+                item.frame_bytes = png_bytes
                 item.preview_data_url = self._to_preview_data_url(png_bytes)
                 self._emit_item_preview(item)
 
-                item.status = "OCR…"
-                self._emit_item_status(item)
-                item.ocr_text = self._ocr_recognizer(
-                    png_bytes,
-                    endpoint=self._config.baidu_ocr_mode,
-                    api_key=secrets["baiduApiKey"],
-                    secret_key=secrets["baiduSecretKey"],
-                )
-                self._emit_item_ocr(item)
+                if self._is_vision_mode():
+                    item.ocr_text = ""
+                    item.status = "视觉识别…"
+                    self._emit_item_status(item)
+                    vision = self._extract_vision_result(
+                        api_key=secrets["deepseekApiKey"],
+                        base_url=self._config.deepseek_base_url,
+                        model=self._config.deepseek_vision_model,
+                        image_bytes=png_bytes,
+                        system_prompt=self._config.deepseek_vision_system_prompt,
+                        user_prompt_template=self._config.deepseek_vision_user_prompt_template,
+                        thinking_enabled=self._config.deepseek_thinking_enabled,
+                    )
+                    self._apply_vision_result(item, vision)
+                else:
+                    item.chapter_title = ""
+                    item.section_title = ""
+                    item.task_summary = ""
+                    item.task_details = ""
+                    item.status = "OCR…"
+                    self._emit_item_status(item)
+                    item.ocr_text = self._ocr_recognizer(
+                        png_bytes,
+                        endpoint=self._config.baidu_ocr_mode,
+                        api_key=secrets["baiduApiKey"],
+                        secret_key=secrets["baiduSecretKey"],
+                    )
+                    self._emit_item_ocr(item)
 
-                item.status = "DeepSeek…"
-                self._emit_item_status(item)
-                item.suggested_title, item.deepseek_raw_text = self._extract_title_and_raw_text(
-                    api_key=secrets["deepseekApiKey"],
-                    base_url=self._config.deepseek_base_url,
-                    model=self._config.deepseek_model,
-                    ocr_text=item.ocr_text,
-                    system_prompt=self._config.deepseek_system_prompt,
-                    user_prompt_template=self._config.deepseek_user_prompt_template,
-                    thinking_enabled=self._config.deepseek_thinking_enabled,
-                )
+                    item.status = "DeepSeek…"
+                    self._emit_item_status(item)
+                    item.suggested_title, item.deepseek_raw_text = self._extract_title_and_raw_text(
+                        api_key=secrets["deepseekApiKey"],
+                        base_url=self._config.deepseek_base_url,
+                        model=self._config.deepseek_model,
+                        ocr_text=item.ocr_text,
+                        system_prompt=self._config.deepseek_system_prompt,
+                        user_prompt_template=self._config.deepseek_user_prompt_template,
+                        thinking_enabled=self._config.deepseek_thinking_enabled,
+                    )
                 target = self._compute_target_path(item)
                 item.new_name = target.name
-                self._emit_item_title(item)
+                if self._is_vision_mode():
+                    self._emit_item_vision(item)
+                else:
+                    self._emit_item_title(item)
 
                 if not self._config.dry_run and target != item.path:
                     old_path = item.path
@@ -452,7 +545,10 @@ class DesktopWorker:
             try:
                 target = self._compute_target_path(item)
                 item.new_name = target.name
-                self._emit_item_title(item)
+                if self._is_vision_mode():
+                    self._emit_item_vision(item)
+                else:
+                    self._emit_item_title(item)
                 if self._config.dry_run:
                     item.status = "预览"
                     item.error = ""
@@ -511,6 +607,47 @@ class DesktopWorker:
         )
         return pick_non_conflicting_path(target, ignore_path=item.path)
 
+    def _is_vision_mode(self) -> bool:
+        return (self._config.recognition_mode or "ocr").strip().lower() == "vision"
+
+    def _ensure_frame_bytes(self, item: WorkerVideoItem) -> None:
+        if item.frame_bytes:
+            return
+        item.frame_bytes = self._frame_extractor(item.path, self._config.frame_number_1based)
+        item.preview_data_url = self._to_preview_data_url(item.frame_bytes)
+        self._emit_item_preview(item)
+
+    def _extract_vision_result(self, **kwargs: object) -> DeepSeekVisionResult:
+        result = self._vision_extractor(**kwargs)
+        if isinstance(result, DeepSeekVisionResult):
+            return result
+        if isinstance(result, dict):
+            def value(*keys: str) -> str:
+                for key in keys:
+                    if key in result:
+                        return str(result[key] or "").strip()
+                return ""
+
+            task_summary = value("task_summary", "taskSummary")
+            suggested_title = value("suggested_title", "suggestedTitle") or task_summary
+            return DeepSeekVisionResult(
+                chapter_title=value("chapter_title", "chapterTitle"),
+                section_title=value("section_title", "sectionTitle"),
+                task_summary=task_summary,
+                task_details=value("task_details", "taskDetails"),
+                suggested_title=suggested_title,
+                raw_text=value("raw_text", "rawText"),
+            )
+        raise DeepSeekError(f"DeepSeek 视觉结果格式异常：{result!r}")
+
+    def _apply_vision_result(self, item: WorkerVideoItem, result: DeepSeekVisionResult) -> None:
+        item.chapter_title = result.chapter_title
+        item.section_title = result.section_title
+        item.task_summary = result.task_summary
+        item.task_details = result.task_details
+        item.suggested_title = result.suggested_title
+        item.deepseek_raw_text = result.raw_text
+
     def _extract_title_and_raw_text(self, **kwargs: object) -> tuple[str, str]:
         result = self._title_extractor(**kwargs)
         if isinstance(result, DeepSeekTitleResult):
@@ -557,9 +694,13 @@ class DesktopWorker:
             "ocrMode": config.baidu_ocr_mode,
             "deepseekBaseUrl": config.deepseek_base_url,
             "deepseekModel": config.deepseek_model,
+            "recognitionMode": config.recognition_mode,
+            "deepseekVisionModel": config.deepseek_vision_model,
             "deepseekThinkingEnabled": config.deepseek_thinking_enabled,
             "deepseekSystemPrompt": config.deepseek_system_prompt,
             "deepseekUserPromptTemplate": config.deepseek_user_prompt_template,
+            "deepseekVisionSystemPrompt": config.deepseek_vision_system_prompt,
+            "deepseekVisionUserPromptTemplate": config.deepseek_vision_user_prompt_template,
             "uiLanguage": config.ui_language,
             "recentDirs": list(config.recent_dirs),
         }
@@ -584,6 +725,10 @@ class DesktopWorker:
             "newName": item.new_name,
             "error": item.error,
             "previewDataUrl": item.preview_data_url,
+            "chapterTitle": item.chapter_title,
+            "sectionTitle": item.section_title,
+            "taskSummary": item.task_summary,
+            "taskDetails": item.task_details,
         }
 
     def _emit_log(self, message: str) -> None:
@@ -614,6 +759,24 @@ class DesktopWorker:
         raw_text = item.deepseek_raw_text.strip()
         if raw_text:
             self._emit_log(f"[DeepSeek] {item.file_name}\n{raw_text}")
+
+    def _emit_item_vision(self, item: WorkerVideoItem) -> None:
+        self._emit(
+            {
+                "event": "item_vision",
+                "id": item.id,
+                "chapterTitle": item.chapter_title,
+                "sectionTitle": item.section_title,
+                "taskSummary": item.task_summary,
+                "taskDetails": item.task_details,
+                "suggestedTitle": item.suggested_title,
+                "deepseekRawText": item.deepseek_raw_text,
+                "newName": item.new_name,
+            }
+        )
+        raw_text = item.deepseek_raw_text.strip()
+        if raw_text:
+            self._emit_log(f"[DeepSeek Vision] {item.file_name}\n{raw_text}")
 
     def _emit_item_status(self, item: WorkerVideoItem) -> None:
         self._emit(
@@ -656,6 +819,8 @@ class DesktopWorker:
         config = load_non_secret_config(self._config_path)
         config.input_dir = self._get_str(values, "input_dir", "inputDir") or config.input_dir
         config.include_subdirs = self._get_bool(values, "include_subdirs", "includeSubdirs", default=config.include_subdirs)
+        recognition_mode = self._get_str(values, "recognition_mode", "recognitionMode") or config.recognition_mode
+        config.recognition_mode = recognition_mode.strip().lower() if recognition_mode.strip().lower() in {"ocr", "vision"} else "ocr"
         config.frame_number_1based = self._get_int(values, "frame_number_1based", "frameNumber", default=config.frame_number_1based)
         config.start_index = self._get_int(values, "start_index", "startIndex", default=config.start_index)
         config.index_padding = self._get_int(values, "index_padding", "indexPadding", default=config.index_padding)
@@ -663,6 +828,7 @@ class DesktopWorker:
         config.baidu_ocr_mode = self._get_str(values, "baidu_ocr_mode", "ocrMode") or config.baidu_ocr_mode
         config.deepseek_base_url = self._get_str(values, "deepseek_base_url", "deepseekBaseUrl") or config.deepseek_base_url
         config.deepseek_model = self._get_str(values, "deepseek_model", "deepseekModel") or config.deepseek_model
+        config.deepseek_vision_model = self._get_str(values, "deepseek_vision_model", "deepseekVisionModel") or config.deepseek_vision_model
         config.deepseek_thinking_enabled = self._get_bool(
             values,
             "deepseek_thinking_enabled",
@@ -673,6 +839,14 @@ class DesktopWorker:
         config.deepseek_user_prompt_template = (
             self._get_str(values, "deepseek_user_prompt_template", "deepseekUserPromptTemplate")
             or config.deepseek_user_prompt_template
+        )
+        config.deepseek_vision_system_prompt = (
+            self._get_str(values, "deepseek_vision_system_prompt", "deepseekVisionSystemPrompt")
+            or config.deepseek_vision_system_prompt
+        )
+        config.deepseek_vision_user_prompt_template = (
+            self._get_str(values, "deepseek_vision_user_prompt_template", "deepseekVisionUserPromptTemplate")
+            or config.deepseek_vision_user_prompt_template
         )
         config.ui_language = self._normalize_language(self._get_str(values, "ui_language", "uiLanguage") or config.ui_language)
         recent_dirs = values.get("recent_dirs", values.get("recentDirs"))
@@ -691,7 +865,7 @@ class DesktopWorker:
         baidu_api_key = self._get_str(values, "baidu_api_key", "baiduApiKey")
         baidu_secret_key = self._get_str(values, "baidu_secret_key", "baiduSecretKey")
         deepseek_api_key = self._get_str(values, "deepseek_api_key", "deepseekApiKey")
-        if not baidu_api_key or not baidu_secret_key:
+        if not self._is_vision_mode() and (not baidu_api_key or not baidu_secret_key):
             raise ValueError("缺少百度 OCR 的 API Key / Secret Key。")
         if not deepseek_api_key:
             raise ValueError("缺少 DeepSeek API Key。")

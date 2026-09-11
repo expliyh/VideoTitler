@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, SupportedLanguage, VideoIndexSuggestion, WorkerLifecycleEvent } from '@videotitler/core';
+import type { AppSettings, AppSettingsInput, LanguageSetting, ProcessingItem, RecognitionMode, SupportedLanguage, VideoIndexSuggestion, WorkerLifecycleEvent } from '@videotitler/core';
 
 import { applyRenamedSourceDirectoryItems, applyWorkerEvent, createInitialUiState, type UiState } from './app-state';
 import { getUiText, resolveSystemLanguage } from './i18n';
@@ -33,12 +33,16 @@ const DEFAULT_SETTINGS: AppSettings = {
   startIndex: 1,
   indexPadding: 3,
   dryRun: false,
+  recognitionMode: 'ocr',
   ocrMode: 'accurate_basic',
   deepseekBaseUrl: 'https://api.deepseek.com/v1',
   deepseekModel: 'deepseek-v4-pro',
+  deepseekVisionModel: 'deepseek-v4-flash',
   deepseekThinkingEnabled: true,
   deepseekSystemPrompt: 'Extract one short video title from the OCR text. Return the title only.',
   deepseekUserPromptTemplate: 'OCR text:\n{ocr_text}\n\nReturn one short title only.',
+  deepseekVisionSystemPrompt: '你是游戏任务界面视觉理解助手。只根据截图中实际可见内容识别，不要把图标、装饰图案或不确定符号当成文字，不要臆测不可见信息。严格只输出包含 chapter_title、section_title、task_summary、task_details、suggested_title 五个字符串字段的 JSON；缺失字段使用空字符串，suggested_title 尽量不超过 20 个汉字。',
+  deepseekVisionUserPromptTemplate: '请观察这张游戏任务界面截图，识别当前正在进行的任务信息，分别提取章标题、节标题、任务简述、详细任务内容，并生成适合视频文件名的简短建议标题。只返回 JSON。',
   uiLanguage: 'system',
   recentDirs: [],
   secretsState: {
@@ -64,12 +68,16 @@ function buildSettingsInput(settings: AppSettings, secretDraft: SecretDraftState
     startIndex: settings.startIndex,
     indexPadding: settings.indexPadding,
     dryRun: settings.dryRun,
+    recognitionMode: settings.recognitionMode,
     ocrMode: settings.ocrMode,
     deepseekBaseUrl: settings.deepseekBaseUrl,
     deepseekModel: settings.deepseekModel,
+    deepseekVisionModel: settings.deepseekVisionModel,
     deepseekThinkingEnabled: settings.deepseekThinkingEnabled,
     deepseekSystemPrompt: settings.deepseekSystemPrompt,
     deepseekUserPromptTemplate: settings.deepseekUserPromptTemplate,
+    deepseekVisionSystemPrompt: settings.deepseekVisionSystemPrompt,
+    deepseekVisionUserPromptTemplate: settings.deepseekVisionUserPromptTemplate,
     uiLanguage: settings.uiLanguage,
     recentDirs: settings.recentDirs,
     baiduApiKey: secretDraft.baiduApiKey,
@@ -134,6 +142,12 @@ export function App() {
   });
   const [ocrDraft, setOcrDraft] = useState('');
   const [titleDraft, setTitleDraft] = useState('');
+  const [visionDraft, setVisionDraft] = useState({
+    chapterTitle: '',
+    sectionTitle: '',
+    taskSummary: '',
+    taskDetails: ''
+  });
   const [indexDraft, setIndexDraft] = useState('1');
   const [indexSuggestion, setIndexSuggestion] = useState<VideoIndexSuggestion | null>(null);
   const [isRenamingSourceDirectory, setIsRenamingSourceDirectory] = useState(false);
@@ -309,7 +323,21 @@ export function App() {
   useEffect(() => {
     setOcrDraft(selectedItem?.ocrText ?? '');
     setTitleDraft(selectedItem?.suggestedTitle ?? '');
-  }, [selectedItem?.id, selectedItem?.ocrText, selectedItem?.suggestedTitle]);
+    setVisionDraft({
+      chapterTitle: selectedItem?.chapterTitle ?? '',
+      sectionTitle: selectedItem?.sectionTitle ?? '',
+      taskSummary: selectedItem?.taskSummary ?? '',
+      taskDetails: selectedItem?.taskDetails ?? ''
+    });
+  }, [
+    selectedItem?.id,
+    selectedItem?.ocrText,
+    selectedItem?.suggestedTitle,
+    selectedItem?.chapterTitle,
+    selectedItem?.sectionTitle,
+    selectedItem?.taskSummary,
+    selectedItem?.taskDetails
+  ]);
 
   useEffect(() => {
     if (!api || !selectedItem) {
@@ -379,7 +407,12 @@ export function App() {
   };
 
   const ensureSecretsReady = (): boolean => {
-    const ready = hasEffectiveSecret(
+    const hasDeepseek = hasEffectiveSecret(
+      settings.secretsState.hasDeepseekApiKey,
+      secretDraft.deepseekApiKey,
+      secretDraft.clearDeepseekApiKey
+    );
+    const hasBaidu = hasEffectiveSecret(
       settings.secretsState.hasBaiduApiKey,
       secretDraft.baiduApiKey,
       secretDraft.clearBaiduApiKey
@@ -387,11 +420,8 @@ export function App() {
       settings.secretsState.hasBaiduSecretKey,
       secretDraft.baiduSecretKey,
       secretDraft.clearBaiduSecretKey
-    ) && hasEffectiveSecret(
-      settings.secretsState.hasDeepseekApiKey,
-      secretDraft.deepseekApiKey,
-      secretDraft.clearDeepseekApiKey
     );
+    const ready = hasDeepseek && (settings.recognitionMode === 'vision' || hasBaidu);
 
     if (!ready) {
       setIsSettingsOpen(true);
@@ -639,6 +669,23 @@ export function App() {
     }
   };
 
+  const handleSaveVision = async () => {
+    if (!api || !selectedItem) {
+      return;
+    }
+
+    try {
+      const updatedItem = await api.saveVisionEdit(selectedItem.id, {
+        ...visionDraft,
+        suggestedTitle: titleDraft
+      });
+      setUiState((previous) => mergeReturnedItem(previous, updatedItem));
+      appendLog(i18n.saveVisionLog(updatedItem.fileName));
+    } catch (error) {
+      appendLog(i18n.saveVisionFailed(formatError(error)));
+    }
+  };
+
   const handleGenerateTitle = async () => {
     if (!api || !selectedItem) {
       return;
@@ -649,7 +696,8 @@ export function App() {
     }
 
     try {
-      const updatedItem = await api.generateTitle(selectedItem.id, ocrDraft);
+      const savedSettings = await persistSettings();
+      const updatedItem = await api.generateTitle(selectedItem.id, savedSettings.recognitionMode === 'ocr' ? ocrDraft : undefined);
       setUiState((previous) => mergeReturnedItem(previous, updatedItem));
       appendLog(i18n.generateTitleLog(updatedItem.fileName));
     } catch (error) {
@@ -780,10 +828,22 @@ export function App() {
             </label>
 
             <label className="field compact">
+              <span>{i18n.recognitionMode}</span>
+              <select
+                value={settings.recognitionMode}
+                onChange={(event) => setSettings((previous) => ({ ...previous, recognitionMode: event.target.value as RecognitionMode }))}
+              >
+                <option value="ocr">{i18n.ocrRecognition}</option>
+                <option value="vision">{i18n.visionRecognition}</option>
+              </select>
+            </label>
+
+            <label className="field compact">
               <span>{i18n.ocrMode}</span>
               <select
                 value={settings.ocrMode}
                 onChange={(event) => setSettings((previous) => ({ ...previous, ocrMode: event.target.value as AppSettings['ocrMode'] }))}
+                disabled={settings.recognitionMode !== 'ocr'}
               >
                 <option value="accurate_basic">accurate_basic</option>
                 <option value="general_basic">general_basic</option>
@@ -816,7 +876,7 @@ export function App() {
               {i18n.scanVideos}
             </button>
             <button type="button" className="button primary" onClick={handleStartProcessing} disabled={!canStartProcessing || isSavingSettings}>
-              {i18n.startProcess}
+              {settings.recognitionMode === 'vision' ? i18n.startVisionProcess : i18n.startProcess}
             </button>
             <button type="button" className="button ghost" onClick={handleStopProcessing} disabled={!canStop}>
               {i18n.stopAfterCurrent}
@@ -953,7 +1013,7 @@ export function App() {
 
             {selectedItem?.error ? <div className="error-banner">{selectedItem.error}</div> : null}
 
-            <div className="editor-block">
+            {settings.recognitionMode === 'ocr' ? <div className="editor-block">
               <div className="editor-header">
                 <h3>{i18n.ocrText}</h3>
                 <button type="button" className="button ghost" onClick={handleSaveOcr} disabled={!selectedItem}>
@@ -967,7 +1027,32 @@ export function App() {
                 placeholder={i18n.ocrPlaceholder}
                 disabled={!selectedItem}
               />
-            </div>
+            </div> : (
+              <div className="editor-block vision-fields">
+                <div className="editor-header">
+                  <h3>{i18n.visionResult}</h3>
+                  <button type="button" className="button ghost" onClick={handleSaveVision} disabled={!selectedItem}>
+                    {i18n.saveVision}
+                  </button>
+                </div>
+                <label className="field">
+                  <span>{i18n.chapterTitle}</span>
+                  <input value={visionDraft.chapterTitle} onChange={(event) => setVisionDraft((previous) => ({ ...previous, chapterTitle: event.target.value }))} disabled={!selectedItem} />
+                </label>
+                <label className="field">
+                  <span>{i18n.sectionTitle}</span>
+                  <input value={visionDraft.sectionTitle} onChange={(event) => setVisionDraft((previous) => ({ ...previous, sectionTitle: event.target.value }))} disabled={!selectedItem} />
+                </label>
+                <label className="field">
+                  <span>{i18n.taskSummary}</span>
+                  <textarea rows={3} value={visionDraft.taskSummary} onChange={(event) => setVisionDraft((previous) => ({ ...previous, taskSummary: event.target.value }))} disabled={!selectedItem} />
+                </label>
+                <label className="field">
+                  <span>{i18n.taskDetails}</span>
+                  <textarea rows={7} value={visionDraft.taskDetails} onChange={(event) => setVisionDraft((previous) => ({ ...previous, taskDetails: event.target.value }))} disabled={!selectedItem} />
+                </label>
+              </div>
+            )}
 
             <div className="editor-block">
               <div className="editor-header">
@@ -1000,7 +1085,7 @@ export function App() {
 
             <div className="detail-actions">
               <button type="button" className="button secondary" onClick={handleGenerateTitle} disabled={!selectedItem}>
-                {i18n.generateTitleFromOcr}
+                {settings.recognitionMode === 'vision' ? i18n.generateVisionResult : i18n.generateTitleFromOcr}
               </button>
               <button type="button" className="button accent" onClick={handleRenameSelected} disabled={!selectedItem || uiState.session.isProcessing}>
                 {i18n.renameSelected}
@@ -1134,6 +1219,14 @@ export function App() {
               />
             </label>
 
+            <label className="field">
+              <span>{i18n.visionModel}</span>
+              <input
+                value={settings.deepseekVisionModel}
+                onChange={(event) => setSettings((previous) => ({ ...previous, deepseekVisionModel: event.target.value }))}
+              />
+            </label>
+
             <label className="toggle">
               <input
                 type="checkbox"
@@ -1158,6 +1251,24 @@ export function App() {
                 rows={7}
                 value={settings.deepseekUserPromptTemplate}
                 onChange={(event) => setSettings((previous) => ({ ...previous, deepseekUserPromptTemplate: event.target.value }))}
+              />
+            </label>
+
+            <label className="field">
+              <span>{i18n.visionSystemPrompt}</span>
+              <textarea
+                rows={7}
+                value={settings.deepseekVisionSystemPrompt}
+                onChange={(event) => setSettings((previous) => ({ ...previous, deepseekVisionSystemPrompt: event.target.value }))}
+              />
+            </label>
+
+            <label className="field">
+              <span>{i18n.visionUserPromptTemplate}</span>
+              <textarea
+                rows={5}
+                value={settings.deepseekVisionUserPromptTemplate}
+                onChange={(event) => setSettings((previous) => ({ ...previous, deepseekVisionUserPromptTemplate: event.target.value }))}
               />
             </label>
           </section>

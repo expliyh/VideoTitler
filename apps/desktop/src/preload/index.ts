@@ -45,6 +45,10 @@ const api = {
   stopProcessing: (): Promise<void> => invoke('worker:stop-processing'),
   saveOcrEdit: (id: string, text: string): Promise<ProcessingItem> => invoke('worker:save-ocr-edit', { id, text }),
   saveTitleEdit: (id: string, title: string): Promise<ProcessingItem> => invoke('worker:save-title-edit', { id, title }),
+  saveVisionEdit: (
+    id: string,
+    fields: Pick<ProcessingItem, 'chapterTitle' | 'sectionTitle' | 'taskSummary' | 'taskDetails' | 'suggestedTitle'>
+  ): Promise<ProcessingItem> => invoke('worker:save-vision-edit', { id, ...fields }),
   renameSourceDirectory: (directory: string, newName: string): Promise<RenameSourceDirectoryResult> =>
     invoke('worker:rename-source-directory', { directory, newName }),
   generateTitle: (id: string, ocrText?: string): Promise<ProcessingItem> =>

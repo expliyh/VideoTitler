@@ -27,7 +27,7 @@ except Exception:  # pragma: no cover
 
 from videotitler.baidu_ocr import BaiduOcrClient, BaiduOcrError
 from videotitler.config import AppConfig, default_config_path, load_config, save_config
-from videotitler.deepseek import DeepSeekError, extract_title_result
+from videotitler.deepseek import DeepSeekError, DeepSeekVisionResult, extract_title_result, extract_vision_result
 from videotitler.rename import build_target_path, pick_non_conflicting_path, suggest_video_index_for_path
 from videotitler.video import VideoFrameError, extract_frame_as_png_bytes
 
@@ -45,6 +45,10 @@ class VideoRow:
     title: str = ""
     new_name: str = ""
     error: str = ""
+    chapter_title: str = ""
+    section_title: str = ""
+    task_summary: str = ""
+    task_details: str = ""
 
 
 def _require_ui_deps() -> None:
@@ -103,7 +107,7 @@ class VideoTitlerApp:
 
     def _build_ui(self) -> None:
         self._root = ttk.Window(themename="flatly")
-        self._root.title("VideoTitler - OCR + DeepSeek 自动命名")
+        self._root.title("VideoTitler - OCR / 视觉多模态 + DeepSeek 自动命名")
         self._root.geometry("1180x720")
         self._root.minsize(1024, 640)
 
@@ -133,6 +137,7 @@ class VideoTitlerApp:
         self._include_subdirs_var = ttk.BooleanVar(value=False)
         self._dry_run_var = ttk.BooleanVar(value=False)
         self._ocr_mode_var = ttk.StringVar(value="accurate_basic")
+        self._recognition_mode_var = ttk.StringVar(value="ocr")
 
         ttk.Label(options, text="第 X 帧(从1开始)").pack(side=LEFT)
         ttk.Spinbox(options, from_=1, to=1_000_000, width=8, textvariable=self._frame_var).pack(
@@ -156,7 +161,17 @@ class VideoTitlerApp:
             side=LEFT
         )
 
-        ttk.Label(options, text="OCR").pack(side=LEFT, padx=(16, 0))
+        ttk.Label(options, text="识别模式").pack(side=LEFT, padx=(16, 0))
+        self._recognition_mode_combo = ttk.Combobox(
+            options,
+            textvariable=self._recognition_mode_var,
+            width=12,
+            values=("ocr", "vision"),
+            state="readonly",
+        )
+        self._recognition_mode_combo.pack(side=LEFT, padx=(8, 8))
+
+        ttk.Label(options, text="OCR").pack(side=LEFT)
         self._ocr_mode_combo = ttk.Combobox(
             options,
             textvariable=self._ocr_mode_var,
@@ -165,11 +180,13 @@ class VideoTitlerApp:
             state="readonly",
         )
         self._ocr_mode_combo.pack(side=LEFT, padx=(8, 0))
+        self._recognition_mode_combo.bind("<<ComboboxSelected>>", self._on_recognition_mode_changed)
 
         actions = ttk.Frame(self._root, padding=(10, 0, 10, 10))
         actions.pack(fill=X)
 
-        ttk.Button(actions, text="开始处理", command=self._start, bootstyle="success").pack(
+        self._start_button = ttk.Button(actions, text="开始处理", command=self._start, bootstyle="success")
+        self._start_button.pack(
             side=LEFT
         )
         ttk.Button(actions, text="重命名全部", command=self._rename_all, bootstyle="primary").pack(
@@ -241,12 +258,13 @@ class VideoTitlerApp:
             command=self._save_ocr_edit,
             bootstyle="secondary",
         ).pack(side=LEFT)
-        ttk.Button(
+        self._generate_button = ttk.Button(
             ocr_toolbar,
             text="用 OCR 生成标题",
             command=self._generate_title_for_selected,
             bootstyle="info",
-        ).pack(side=LEFT, padx=(8, 0))
+        )
+        self._generate_button.pack(side=LEFT, padx=(8, 0))
         ttk.Button(
             ocr_toolbar,
             text="单条重命名",
@@ -310,6 +328,29 @@ class VideoTitlerApp:
         self._ocr_text = ScrolledText(tab_ocr, height=12, wrap="word")
         self._ocr_text.pack(fill=BOTH, expand=True)
 
+        ttk.Label(tab_ocr, text="视觉任务信息（视觉多模态模式）").pack(anchor="w", pady=(10, 0))
+        self._vision_fields_frame = ttk.Frame(tab_ocr)
+        self._vision_fields_frame.pack(fill=X, pady=(4, 0))
+        self._chapter_title_var = ttk.StringVar(value="")
+        self._section_title_var = ttk.StringVar(value="")
+        for label, variable in (("章标题", self._chapter_title_var), ("节标题", self._section_title_var)):
+            row_frame = ttk.Frame(self._vision_fields_frame)
+            row_frame.pack(fill=X, pady=2)
+            ttk.Label(row_frame, text=label, width=10).pack(side=LEFT)
+            ttk.Entry(row_frame, textvariable=variable).pack(side=LEFT, fill=X, expand=True)
+        ttk.Label(self._vision_fields_frame, text="任务简述").pack(anchor="w")
+        self._task_summary_text = ScrolledText(self._vision_fields_frame, height=3, wrap="word")
+        self._task_summary_text.pack(fill=X, pady=2)
+        ttk.Label(self._vision_fields_frame, text="详细任务内容").pack(anchor="w")
+        self._task_details_text = ScrolledText(self._vision_fields_frame, height=6, wrap="word")
+        self._task_details_text.pack(fill=X, pady=2)
+        ttk.Button(
+            self._vision_fields_frame,
+            text="保存视觉任务信息",
+            command=self._save_vision_edit,
+            bootstyle="secondary",
+        ).pack(anchor="w", pady=(2, 4))
+
         self._log_text = ScrolledText(tab_ocr, height=10, wrap="word")
         self._log_text.pack(fill=BOTH, expand=True, pady=(10, 0))
 
@@ -319,6 +360,7 @@ class VideoTitlerApp:
         self._deepseek_api_key_var = ttk.StringVar(value="")
         self._deepseek_base_url_var = ttk.StringVar(value="https://api.deepseek.com/v1")
         self._deepseek_model_var = ttk.StringVar(value="deepseek-v4-pro")
+        self._deepseek_vision_model_var = ttk.StringVar(value="deepseek-v4-flash")
         self._deepseek_thinking_enabled_var = ttk.BooleanVar(value=True)
         self._save_keys_var = ttk.BooleanVar(value=False)
 
@@ -335,38 +377,48 @@ class VideoTitlerApp:
         add_row(2, "DeepSeek API Key", self._deepseek_api_key_var, show="*")
         add_row(3, "DeepSeek Base URL", self._deepseek_base_url_var)
         add_row(4, "DeepSeek Model", self._deepseek_model_var)
+        add_row(5, "DeepSeek Vision Model", self._deepseek_vision_model_var)
         ttk.Checkbutton(
             grid,
             text="DeepSeek Thinking Mode",
             variable=self._deepseek_thinking_enabled_var,
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 6))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 6))
 
         grid.columnconfigure(1, weight=1)
 
         ttk.Checkbutton(grid, text="保存密钥到本地 config.json", variable=self._save_keys_var).grid(
-            row=6, column=0, columnspan=2, sticky="w", pady=(8, 10)
+            row=7, column=0, columnspan=2, sticky="w", pady=(8, 10)
         )
         ttk.Button(grid, text="保存设置", command=self._save_settings, bootstyle="secondary").grid(
-            row=7, column=0, sticky="w"
+            row=8, column=0, sticky="w"
         )
 
-        ttk.Separator(grid).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 10))
-        ttk.Label(grid, text="DeepSeek System Prompt").grid(row=9, column=0, sticky="nw", pady=6)
+        ttk.Separator(grid).grid(row=9, column=0, columnspan=2, sticky="ew", pady=(14, 10))
+        ttk.Label(grid, text="DeepSeek System Prompt").grid(row=10, column=0, sticky="nw", pady=6)
         self._ds_system_prompt_text = ScrolledText(grid, height=6, wrap="word")
-        self._ds_system_prompt_text.grid(row=9, column=1, sticky="nsew", pady=6, padx=(10, 0))
+        self._ds_system_prompt_text.grid(row=10, column=1, sticky="nsew", pady=6, padx=(10, 0))
 
         ttk.Label(grid, text="DeepSeek User Prompt 模板（支持 {ocr_text}）").grid(
-            row=10, column=0, sticky="nw", pady=6
+            row=11, column=0, sticky="nw", pady=6
         )
         self._ds_user_prompt_text = ScrolledText(grid, height=8, wrap="word")
-        self._ds_user_prompt_text.grid(row=10, column=1, sticky="nsew", pady=6, padx=(10, 0))
+        self._ds_user_prompt_text.grid(row=11, column=1, sticky="nsew", pady=6, padx=(10, 0))
+
+        ttk.Label(grid, text="DeepSeek Vision System Prompt").grid(row=13, column=0, sticky="nw", pady=6)
+        self._ds_vision_system_prompt_text = ScrolledText(grid, height=7, wrap="word")
+        self._ds_vision_system_prompt_text.grid(row=13, column=1, sticky="nsew", pady=6, padx=(10, 0))
+        ttk.Label(grid, text="DeepSeek Vision User Prompt").grid(row=14, column=0, sticky="nw", pady=6)
+        self._ds_vision_user_prompt_text = ScrolledText(grid, height=5, wrap="word")
+        self._ds_vision_user_prompt_text.grid(row=14, column=1, sticky="nsew", pady=6, padx=(10, 0))
 
         ttk.Button(grid, text="重置为默认 Prompt", command=self._reset_prompts, bootstyle="secondary").grid(
-            row=11, column=0, sticky="w", pady=(6, 0)
+            row=15, column=0, sticky="w", pady=(6, 0)
         )
 
-        grid.rowconfigure(9, weight=1)
-        grid.rowconfigure(10, weight=2)
+        grid.rowconfigure(10, weight=1)
+        grid.rowconfigure(11, weight=2)
+        grid.rowconfigure(13, weight=1)
+        grid.rowconfigure(14, weight=1)
 
     def _append_log(self, message: str) -> None:
         self._log_text.insert(END, message.rstrip() + "\n")
@@ -385,11 +437,31 @@ class VideoTitlerApp:
         self._deepseek_raw_text.insert(END, text or "")
         self._deepseek_raw_text.see("1.0")
 
+    def _set_task_details(self, row: VideoRow) -> None:
+        self._chapter_title_var.set(row.chapter_title or "")
+        self._section_title_var.set(row.section_title or "")
+        self._task_summary_text.delete("1.0", END)
+        self._task_summary_text.insert(END, row.task_summary or "")
+        self._task_details_text.delete("1.0", END)
+        self._task_details_text.insert(END, row.task_details or "")
+
+    def _on_recognition_mode_changed(self, _event: object) -> None:
+        is_vision = (self._recognition_mode_var.get() or "ocr").strip().lower() == "vision"
+        self._ocr_mode_combo.configure(state="disabled" if is_vision else "readonly")
+        self._start_button.configure(text="视觉多模态处理" if is_vision else "开始处理")
+        self._generate_button.configure(text="识别视觉任务" if is_vision else "用 OCR 生成标题")
+
     def _extract_title_and_raw_text(self, **kwargs: object) -> tuple[str, str]:
         result = extract_title_result(**kwargs)
         if hasattr(result, "title") and hasattr(result, "raw_text"):
             return str(result.title), str(result.raw_text)
         return str(result).strip(), ""
+
+    def _extract_vision_result(self, **kwargs: object) -> DeepSeekVisionResult:
+        result = extract_vision_result(**kwargs)
+        if isinstance(result, DeepSeekVisionResult):
+            return result
+        raise DeepSeekError(f"视觉结果格式异常：{result!r}")
 
     def _get_selected_row(self) -> VideoRow | None:
         selection = self._tree.selection()
@@ -556,6 +628,34 @@ class VideoTitlerApp:
         self._append_log(f"已保存 OCR 编辑：{row.path.name}")
         self._update_row(row.path, status=row.status, ocr_text=row.ocr_text, error=row.error)
 
+    def _save_vision_edit(self) -> None:
+        row = self._get_selected_row()
+        if row is None:
+            self._append_log("请先在左侧列表选择一条视频。")
+            return
+
+        row.chapter_title = self._chapter_title_var.get().strip()
+        row.section_title = self._section_title_var.get().strip()
+        row.task_summary = self._task_summary_text.get("1.0", END).strip()
+        row.task_details = self._task_details_text.get("1.0", END).strip()
+        row.title = self._title_var.get().strip()
+        self._update_new_name_preview(row)
+        row.error = ""
+        row.status = "已编辑"
+        self._set_error("")
+        self._append_log(f"已保存视觉任务信息：{row.path.name}")
+        self._update_row(
+            row.path,
+            status=row.status,
+            title=row.title,
+            new_name=row.new_name,
+            chapter_title=row.chapter_title,
+            section_title=row.section_title,
+            task_summary=row.task_summary,
+            task_details=row.task_details,
+            error=row.error,
+        )
+
     def _save_title_edit(self) -> None:
         row = self._get_selected_row()
         if row is None:
@@ -587,13 +687,17 @@ class VideoTitlerApp:
             self._append_log("请先在“密钥/设置”中填写 DeepSeek API Key。")
             return
 
+        is_vision = (cfg.recognition_mode or "ocr").strip().lower() == "vision"
         ocr_text = self._ocr_text.get("1.0", END).strip()
-        if not ocr_text:
+        if not is_vision and not ocr_text:
             self._append_log("OCR 文本为空：请先编辑/粘贴识别结果。")
             return
+        if is_vision:
+            ocr_text = ""
+            self._set_ocr_text("")
 
         row.ocr_text = ocr_text
-        row.status = "DeepSeek…"
+        row.status = "视觉识别…" if is_vision else "DeepSeek…"
         row.error = ""
         self._set_error("")
         self._update_row(row.path, status=row.status, ocr_text=row.ocr_text, error=row.error)
@@ -605,20 +709,36 @@ class VideoTitlerApp:
         user_prompt_template = cfg.deepseek_user_prompt_template
         base_url = cfg.deepseek_base_url
         model = cfg.deepseek_model
+        vision_model = cfg.deepseek_vision_model
         thinking_enabled = cfg.deepseek_thinking_enabled
         api_key = cfg.deepseek_api_key
 
         def worker() -> None:
             try:
-                title, raw_text = self._extract_title_and_raw_text(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
-                    ocr_text=ocr_text,
-                    system_prompt=system_prompt,
-                    user_prompt_template=user_prompt_template,
-                    thinking_enabled=thinking_enabled,
-                )
+                if is_vision:
+                    png_bytes, image = extract_frame_as_png_bytes(src_path, cfg.frame_number_1based)
+                    self._queue.put(("preview", (src_path, image)))
+                    vision = self._extract_vision_result(
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=vision_model,
+                        image_bytes=png_bytes,
+                        system_prompt=cfg.deepseek_vision_system_prompt,
+                        user_prompt_template=cfg.deepseek_vision_user_prompt_template,
+                        thinking_enabled=thinking_enabled,
+                    )
+                    title = vision.suggested_title
+                    raw_text = vision.raw_text
+                else:
+                    title, raw_text = self._extract_title_and_raw_text(
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=model,
+                        ocr_text=ocr_text,
+                        system_prompt=system_prompt,
+                        user_prompt_template=user_prompt_template,
+                        thinking_enabled=thinking_enabled,
+                    )
                 target = build_target_path(
                     src_path,
                     index=index,
@@ -626,7 +746,10 @@ class VideoTitlerApp:
                     title=title,
                 )
                 target = pick_non_conflicting_path(target, ignore_path=src_path)
-                self._queue.put(("title", (src_path, title, raw_text, target.name)))
+                if is_vision:
+                    self._queue.put(("vision", (src_path, vision, target.name)))
+                else:
+                    self._queue.put(("title", (src_path, title, raw_text, target.name)))
                 if raw_text.strip():
                     self._queue.put(("log", f"[DeepSeek] {src_path.name}\n{raw_text}"))
                 self._queue.put(("status", (src_path, "待重命名")))
@@ -704,16 +827,23 @@ class VideoTitlerApp:
         self._start_index_var.set(int(cfg.start_index or 1))
         self._padding_var.set(int(cfg.index_padding or 3))
         self._dry_run_var.set(bool(cfg.dry_run))
+        self._recognition_mode_var.set((cfg.recognition_mode or "ocr").strip())
         self._ocr_mode_var.set((cfg.baidu_ocr_mode or "accurate_basic").strip())
+        self._on_recognition_mode_changed(None)
 
         self._deepseek_base_url_var.set(cfg.deepseek_base_url or "https://api.deepseek.com/v1")
         self._deepseek_model_var.set(cfg.deepseek_model or "deepseek-v4-pro")
+        self._deepseek_vision_model_var.set(cfg.deepseek_vision_model or "deepseek-v4-flash")
         self._deepseek_thinking_enabled_var.set(bool(cfg.deepseek_thinking_enabled))
         self._save_keys_var.set(bool(cfg.save_keys_locally))
         self._ds_system_prompt_text.delete("1.0", END)
         self._ds_system_prompt_text.insert(END, cfg.deepseek_system_prompt or "")
         self._ds_user_prompt_text.delete("1.0", END)
         self._ds_user_prompt_text.insert(END, cfg.deepseek_user_prompt_template or "")
+        self._ds_vision_system_prompt_text.delete("1.0", END)
+        self._ds_vision_system_prompt_text.insert(END, cfg.deepseek_vision_system_prompt or "")
+        self._ds_vision_user_prompt_text.delete("1.0", END)
+        self._ds_vision_user_prompt_text.insert(END, cfg.deepseek_vision_user_prompt_template or "")
         if cfg.save_keys_locally:
             self._baidu_api_key_var.set(cfg.baidu_api_key)
             self._baidu_secret_key_var.set(cfg.baidu_secret_key)
@@ -727,6 +857,7 @@ class VideoTitlerApp:
         cfg.start_index = int(self._start_index_var.get() or 1)
         cfg.index_padding = int(self._padding_var.get() or 3)
         cfg.dry_run = bool(self._dry_run_var.get())
+        cfg.recognition_mode = (self._recognition_mode_var.get() or "ocr").strip().lower()
         cfg.baidu_ocr_mode = (self._ocr_mode_var.get() or "accurate_basic").strip()
 
         cfg.baidu_api_key = self._baidu_api_key_var.get().strip()
@@ -734,10 +865,13 @@ class VideoTitlerApp:
         cfg.deepseek_api_key = self._deepseek_api_key_var.get().strip()
         cfg.deepseek_base_url = self._deepseek_base_url_var.get().strip() or "https://api.deepseek.com/v1"
         cfg.deepseek_model = self._deepseek_model_var.get().strip() or "deepseek-v4-pro"
+        cfg.deepseek_vision_model = self._deepseek_vision_model_var.get().strip() or "deepseek-v4-flash"
         cfg.deepseek_thinking_enabled = bool(self._deepseek_thinking_enabled_var.get())
         cfg.save_keys_locally = bool(self._save_keys_var.get())
         cfg.deepseek_system_prompt = self._ds_system_prompt_text.get("1.0", END).strip()
         cfg.deepseek_user_prompt_template = self._ds_user_prompt_text.get("1.0", END).strip()
+        cfg.deepseek_vision_system_prompt = self._ds_vision_system_prompt_text.get("1.0", END).strip()
+        cfg.deepseek_vision_user_prompt_template = self._ds_vision_user_prompt_text.get("1.0", END).strip()
 
         # Recent dirs
         if cfg.input_dir:
@@ -751,11 +885,18 @@ class VideoTitlerApp:
         self._ds_system_prompt_text.insert(END, cfg.deepseek_system_prompt)
         self._ds_user_prompt_text.delete("1.0", END)
         self._ds_user_prompt_text.insert(END, cfg.deepseek_user_prompt_template)
+        self._ds_vision_system_prompt_text.delete("1.0", END)
+        self._ds_vision_system_prompt_text.insert(END, cfg.deepseek_vision_system_prompt)
+        self._ds_vision_user_prompt_text.delete("1.0", END)
+        self._ds_vision_user_prompt_text.insert(END, cfg.deepseek_vision_user_prompt_template)
         self._append_log("已重置 Prompt（记得点“保存设置”）。")
 
     def _save_settings(self) -> None:
         cfg = self._read_ui_to_config()
-        if not cfg.baidu_api_key or not cfg.baidu_secret_key:
+        if cfg.recognition_mode not in {"ocr", "vision"}:
+            self._append_log("识别模式无效，请选择 ocr 或 vision。")
+            return
+        if cfg.recognition_mode == "ocr" and (not cfg.baidu_api_key or not cfg.baidu_secret_key):
             self._append_log("请先在“密钥/设置”中填写百度 API Key / Secret Key。")
             return
         if not cfg.deepseek_api_key:
@@ -816,7 +957,18 @@ class VideoTitlerApp:
             self._append_log("请先扫描视频。")
             return
 
-        cfg = self._snapshot_config()
+        cfg = self._read_ui_to_config()
+        if cfg.recognition_mode not in {"ocr", "vision"}:
+            self._append_log("识别模式无效，请选择 ocr 或 vision。")
+            return
+        if cfg.recognition_mode == "ocr" and (not cfg.baidu_api_key or not cfg.baidu_secret_key):
+            self._append_log("OCR 模式需要百度 API Key / Secret Key。")
+            return
+        if not cfg.deepseek_api_key:
+            self._append_log("请先在“密钥/设置”中填写 DeepSeek API Key。")
+            return
+        save_config(self._config_path, cfg)
+        cfg = AppConfig(**asdict(cfg))
 
         self._stop_event.clear()
         self._progress.configure(value=0, maximum=max(1, len(self._rows)))
@@ -885,8 +1037,6 @@ class VideoTitlerApp:
         self._queue.put(("done", "重命名结束。"))
 
     def _run_worker(self, cfg: AppConfig) -> None:
-        ocr_client = BaiduOcrClient(cfg.baidu_api_key, cfg.baidu_secret_key)
-
         for offset, row in enumerate(self._rows):
             if self._stop_event.is_set():
                 break
@@ -900,22 +1050,38 @@ class VideoTitlerApp:
                 png_bytes, image = extract_frame_as_png_bytes(row.path, cfg.frame_number_1based)
                 self._queue.put(("preview", (row.path, image)))
 
-                stage = "OCR"
-                self._queue.put(("status", (row.path, "OCR…")))
-                ocr_text = ocr_client.recognize(png_bytes, endpoint=cfg.baidu_ocr_mode)
-                self._queue.put(("ocr", (row.path, ocr_text)))
+                if cfg.recognition_mode == "vision":
+                    stage = "视觉识别"
+                    self._queue.put(("status", (row.path, "视觉识别…")))
+                    vision = self._extract_vision_result(
+                        api_key=cfg.deepseek_api_key,
+                        base_url=cfg.deepseek_base_url,
+                        model=cfg.deepseek_vision_model,
+                        image_bytes=png_bytes,
+                        system_prompt=cfg.deepseek_vision_system_prompt,
+                        user_prompt_template=cfg.deepseek_vision_user_prompt_template,
+                        thinking_enabled=cfg.deepseek_thinking_enabled,
+                    )
+                    title = vision.suggested_title
+                    raw_text = vision.raw_text
+                else:
+                    stage = "OCR"
+                    self._queue.put(("status", (row.path, "OCR…")))
+                    ocr_client = BaiduOcrClient(cfg.baidu_api_key, cfg.baidu_secret_key)
+                    ocr_text = ocr_client.recognize(png_bytes, endpoint=cfg.baidu_ocr_mode)
+                    self._queue.put(("ocr", (row.path, ocr_text)))
 
-                stage = "DeepSeek"
-                self._queue.put(("status", (row.path, "DeepSeek…")))
-                title, raw_text = self._extract_title_and_raw_text(
-                    api_key=cfg.deepseek_api_key,
-                    base_url=cfg.deepseek_base_url,
-                    model=cfg.deepseek_model,
-                    ocr_text=ocr_text,
-                    system_prompt=cfg.deepseek_system_prompt,
-                    user_prompt_template=cfg.deepseek_user_prompt_template,
-                    thinking_enabled=cfg.deepseek_thinking_enabled,
-                )
+                    stage = "DeepSeek"
+                    self._queue.put(("status", (row.path, "DeepSeek…")))
+                    title, raw_text = self._extract_title_and_raw_text(
+                        api_key=cfg.deepseek_api_key,
+                        base_url=cfg.deepseek_base_url,
+                        model=cfg.deepseek_model,
+                        ocr_text=ocr_text,
+                        system_prompt=cfg.deepseek_system_prompt,
+                        user_prompt_template=cfg.deepseek_user_prompt_template,
+                        thinking_enabled=cfg.deepseek_thinking_enabled,
+                    )
 
                 target = build_target_path(
                     row.path,
@@ -926,7 +1092,10 @@ class VideoTitlerApp:
                 target = pick_non_conflicting_path(target, ignore_path=row.path)
 
                 new_name = target.name
-                self._queue.put(("title", (row.path, title, raw_text, new_name)))
+                if cfg.recognition_mode == "vision":
+                    self._queue.put(("vision", (row.path, vision, new_name)))
+                else:
+                    self._queue.put(("title", (row.path, title, raw_text, new_name)))
                 if raw_text.strip():
                     self._queue.put(("log", f"[DeepSeek] {row.path.name}\n{raw_text}"))
 
@@ -989,12 +1158,46 @@ class VideoTitlerApp:
             return
 
         if kind == "title":
+            clear_vision = (self._recognition_mode_var.get() or "ocr").strip().lower() != "vision"
             if isinstance(payload, tuple) and len(payload) == 4:
                 path, title, raw_text, new_name = payload  # type: ignore[misc]
-                self._update_row(path, title=str(title), deepseek_raw_text=str(raw_text), new_name=str(new_name))
+                self._update_row(
+                    path,
+                    title=str(title),
+                    deepseek_raw_text=str(raw_text),
+                    new_name=str(new_name),
+                    chapter_title="" if clear_vision else None,
+                    section_title="" if clear_vision else None,
+                    task_summary="" if clear_vision else None,
+                    task_details="" if clear_vision else None,
+                )
             else:
                 path, title, new_name = payload  # type: ignore[misc]
-                self._update_row(path, title=str(title), new_name=str(new_name))
+                self._update_row(
+                    path,
+                    title=str(title),
+                    new_name=str(new_name),
+                    chapter_title="" if clear_vision else None,
+                    section_title="" if clear_vision else None,
+                    task_summary="" if clear_vision else None,
+                    task_details="" if clear_vision else None,
+                )
+            return
+
+        if kind == "vision":
+            path, vision, new_name = payload  # type: ignore[misc]
+            if isinstance(vision, DeepSeekVisionResult):
+                self._update_row(
+                    path,
+                    ocr_text="",
+                    title=vision.suggested_title,
+                    deepseek_raw_text=vision.raw_text,
+                    new_name=str(new_name),
+                    chapter_title=vision.chapter_title,
+                    section_title=vision.section_title,
+                    task_summary=vision.task_summary,
+                    task_details=vision.task_details,
+                )
             return
 
         if kind == "renamed":
@@ -1048,6 +1251,10 @@ class VideoTitlerApp:
         preview_image: object | None = None,
         title: str | None = None,
         new_name: str | None = None,
+        chapter_title: str | None = None,
+        section_title: str | None = None,
+        task_summary: str | None = None,
+        task_details: str | None = None,
         error: str | None = None,
     ) -> None:
         for row in self._rows:
@@ -1064,6 +1271,14 @@ class VideoTitlerApp:
                     row.title = title
                 if new_name is not None:
                     row.new_name = new_name
+                if chapter_title is not None:
+                    row.chapter_title = chapter_title
+                if section_title is not None:
+                    row.section_title = section_title
+                if task_summary is not None:
+                    row.task_summary = task_summary
+                if task_details is not None:
+                    row.task_details = task_details
                 if error is not None:
                     row.error = error
 
@@ -1102,6 +1317,7 @@ class VideoTitlerApp:
         self._set_ocr_text(row.ocr_text)
         self._set_deepseek_raw_text(row.deepseek_raw_text)
         self._title_var.set(row.title or "")
+        self._set_task_details(row)
         self._set_error(row.error)
         if row.preview_image is not None:
             self._set_preview_image(row.path, row.preview_image)  # type: ignore[arg-type]

@@ -121,6 +121,20 @@ function registerIpcHandlers(): void {
   ipcMain.handle('worker:save-ocr-edit', async (_event, args: { id: string; text: string }) => getBackend().saveOcrEdit(args.id, args.text));
   ipcMain.handle('worker:save-title-edit', async (_event, args: { id: string; title: string }) => getBackend().saveTitleEdit(args.id, args.title));
   ipcMain.handle(
+    'worker:save-vision-edit',
+    async (
+      _event,
+      args: {
+        id: string;
+        chapterTitle: string;
+        sectionTitle: string;
+        taskSummary: string;
+        taskDetails: string;
+        suggestedTitle: string;
+      }
+    ) => getBackend().saveVisionEdit(args.id, args)
+  );
+  ipcMain.handle(
     'worker:rename-source-directory',
     async (_event, args: { directory: string; newName: string }) => getBackend().renameSourceDirectory(args.directory, args.newName)
   );

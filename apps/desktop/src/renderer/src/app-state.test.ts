@@ -21,6 +21,10 @@ function makeItem(overrides: Partial<ProcessingItem> = {}): ProcessingItem {
     newName: '',
     error: '',
     previewDataUrl: '',
+    chapterTitle: '',
+    sectionTitle: '',
+    taskSummary: '',
+    taskDetails: '',
     ...overrides
   };
 }
@@ -55,6 +59,27 @@ test('applyWorkerEvent merges per-item updates into the current item list', () =
     deepseekRawText: 'New Title\nfull DeepSeek response',
     newName: '001-New Title.mp4'
   });
+});
+
+test('applyWorkerEvent merges visual task fields into the selected item', () => {
+  const initial = createInitialUiState();
+  initial.items = [makeItem()];
+
+  const next = applyWorkerEvent(initial, {
+    event: 'item_vision',
+    id: 'item-1',
+    chapterTitle: 'Chapter 1',
+    sectionTitle: 'Opening',
+    taskSummary: 'Find the gate',
+    taskDetails: 'Travel north and speak with the guard.',
+    suggestedTitle: 'Find the gate',
+    deepseekRawText: '{...}',
+    newName: '001-Find the gate.mp4'
+  });
+
+  assert.equal(next.items[0]?.chapterTitle, 'Chapter 1');
+  assert.equal(next.items[0]?.taskDetails, 'Travel north and speak with the guard.');
+  assert.equal(next.items[0]?.newName, '001-Find the gate.mp4');
 });
 
 test('applyWorkerEvent updates progress, rename state, and appends logs', () => {

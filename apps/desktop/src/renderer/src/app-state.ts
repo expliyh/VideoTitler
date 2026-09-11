@@ -78,6 +78,27 @@ export function applyWorkerEvent(state: UiState, event: WorkerEvent): UiState {
       ...state,
       items: updateItem(state.items, event.id, (item) => ({
         ...item,
+        chapterTitle: '',
+        sectionTitle: '',
+        taskSummary: '',
+        taskDetails: '',
+        suggestedTitle: event.suggestedTitle,
+        deepseekRawText: event.deepseekRawText,
+        newName: event.newName
+      }))
+    };
+  }
+
+  if (event.event === 'item_vision') {
+    return {
+      ...state,
+      items: updateItem(state.items, event.id, (item) => ({
+        ...item,
+        ocrText: '',
+        chapterTitle: event.chapterTitle,
+        sectionTitle: event.sectionTitle,
+        taskSummary: event.taskSummary,
+        taskDetails: event.taskDetails,
         suggestedTitle: event.suggestedTitle,
         deepseekRawText: event.deepseekRawText,
         newName: event.newName

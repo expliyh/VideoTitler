@@ -18,6 +18,7 @@ type LegacyMigrationOptions = {
 const NON_SECRET_FIELDS = [
   'input_dir',
   'include_subdirs',
+  'recognition_mode',
   'frame_number_1based',
   'start_index',
   'index_padding',
@@ -25,8 +26,12 @@ const NON_SECRET_FIELDS = [
   'baidu_ocr_mode',
   'deepseek_base_url',
   'deepseek_model',
+  'deepseek_vision_model',
+  'deepseek_thinking_enabled',
   'deepseek_system_prompt',
   'deepseek_user_prompt_template',
+  'deepseek_vision_system_prompt',
+  'deepseek_vision_user_prompt_template',
   'ui_language',
   'recent_dirs'
 ] as const;

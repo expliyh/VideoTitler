@@ -44,12 +44,16 @@ function toWorkerSettingsPayload(settings: AppSettingsInput): WorkerSettingsPayl
     startIndex: settings.startIndex,
     indexPadding: settings.indexPadding,
     dryRun: settings.dryRun,
+    recognitionMode: settings.recognitionMode,
     ocrMode: settings.ocrMode,
     deepseekBaseUrl: settings.deepseekBaseUrl,
     deepseekModel: settings.deepseekModel,
+    deepseekVisionModel: settings.deepseekVisionModel,
     deepseekThinkingEnabled: settings.deepseekThinkingEnabled,
     deepseekSystemPrompt: settings.deepseekSystemPrompt,
     deepseekUserPromptTemplate: settings.deepseekUserPromptTemplate,
+    deepseekVisionSystemPrompt: settings.deepseekVisionSystemPrompt,
+    deepseekVisionUserPromptTemplate: settings.deepseekVisionUserPromptTemplate,
     uiLanguage: settings.uiLanguage,
     recentDirs: settings.recentDirs
   };
@@ -180,6 +184,22 @@ export class DesktopBackend {
       id,
       ocrText,
       secrets
+    });
+    return payload.item;
+  }
+
+  async saveVisionEdit(
+    id: string,
+    fields: Pick<ProcessingItem, 'chapterTitle' | 'sectionTitle' | 'taskSummary' | 'taskDetails' | 'suggestedTitle'>
+  ): Promise<ProcessingItem> {
+    const worker = await this.ensureWorker();
+    const payload = await worker.request<{ item: ProcessingItem }>('save_vision_edit', {
+      id,
+      chapterTitle: fields.chapterTitle,
+      sectionTitle: fields.sectionTitle,
+      taskSummary: fields.taskSummary,
+      taskDetails: fields.taskDetails,
+      suggestedTitle: fields.suggestedTitle
     });
     return payload.item;
   }

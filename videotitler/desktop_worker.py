@@ -105,6 +105,7 @@ class WorkerVideoItem:
     task_summary: str = ""
     task_details: str = ""
     frame_bytes: bytes = field(default=b"", repr=False)
+    frame_number_1based: int = field(default=0, repr=False)
 
     @property
     def file_name(self) -> str:
@@ -463,6 +464,7 @@ class DesktopWorker:
 
                 png_bytes = self._frame_extractor(item.path, self._config.frame_number_1based)
                 item.frame_bytes = png_bytes
+                item.frame_number_1based = self._config.frame_number_1based
                 item.preview_data_url = self._to_preview_data_url(png_bytes)
                 self._emit_item_preview(item)
 
@@ -611,9 +613,11 @@ class DesktopWorker:
         return (self._config.recognition_mode or "ocr").strip().lower() == "vision"
 
     def _ensure_frame_bytes(self, item: WorkerVideoItem) -> None:
-        if item.frame_bytes:
+        requested_frame = self._config.frame_number_1based
+        if item.frame_bytes and item.frame_number_1based == requested_frame:
             return
-        item.frame_bytes = self._frame_extractor(item.path, self._config.frame_number_1based)
+        item.frame_bytes = self._frame_extractor(item.path, requested_frame)
+        item.frame_number_1based = requested_frame
         item.preview_data_url = self._to_preview_data_url(item.frame_bytes)
         self._emit_item_preview(item)
 

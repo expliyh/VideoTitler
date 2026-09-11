@@ -223,6 +223,59 @@ class DesktopWorkerTests(unittest.TestCase):
             self.assertEqual(extracted, ["clip.mp4:9"])
             self.assertEqual(result["item"]["suggestedTitle"], "调查现场")
 
+    def test_generate_title_in_vision_mode_refreshes_cached_frame_when_frame_changes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(b"")
+            extracted: list[str] = []
+            vision_frames: list[bytes] = []
+
+            def frame_extractor(path: Path, frame_number: int) -> bytes:
+                extracted.append(f"{path.name}:{frame_number}")
+                return f"frame-{frame_number}".encode()
+
+            def vision_extractor(**kwargs: object) -> dict[str, str]:
+                vision_frames.append(kwargs["image_bytes"])  # type: ignore[arg-type]
+                return {
+                    "chapter_title": "第一章",
+                    "section_title": "任务",
+                    "task_summary": "调查",
+                    "task_details": "调查现场",
+                    "suggested_title": "调查现场",
+                }
+
+            worker = self._create_worker(
+                root / "settings.json",
+                emit=lambda _event: None,
+                frame_extractor=frame_extractor,
+                vision_extractor=vision_extractor,
+            )
+            worker.handle_request(
+                "save_settings",
+                {
+                    "settings": {
+                        "inputDir": str(root),
+                        "recognitionMode": "vision",
+                        "frameNumber": 2,
+                        "dryRun": True,
+                    }
+                },
+            )
+            item_id = worker.handle_request("scan_videos", {"directory": str(root), "includeSubdirs": False})["items"][0]["id"]
+            worker.handle_request("start_processing", {"secrets": {"deepseekApiKey": "key"}})
+            worker.wait_for_idle(timeout=3)
+            self.assertEqual(extracted, ["clip.mp4:2"])
+
+            worker.handle_request("save_settings", {"settings": {"frameNumber": 5}})
+            worker.handle_request(
+                "generate_title_from_ocr",
+                {"id": item_id, "secrets": {"deepseekApiKey": "key"}},
+            )
+
+            self.assertEqual(extracted, ["clip.mp4:2", "clip.mp4:5"])
+            self.assertEqual(vision_frames, [b"frame-2", b"frame-5"])
+
     def test_save_settings_supports_deepseek_thinking_mode(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
